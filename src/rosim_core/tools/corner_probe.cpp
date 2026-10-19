@@ -63,11 +63,7 @@ int main(int argc, char** argv)
     else if (k == "--window")
       window_mm = std::stod(argv[i + 1]);
   }
-  if (edges_arg.empty())
-  {
-    std::cerr << "--edges is required\n";
-    return 1;
-  }
+  const bool auto_mode = edges_arg.empty();
 
   std::vector<uint32_t> idx;
   std::string cur;
@@ -86,6 +82,89 @@ int main(int argc, char** argv)
   Eigen::Isometry3d T = Eigen::Isometry3d::Identity();
   T.translation() = pose;
   auto model = OccGeometryService::importModel(argv[1], T, "probe");
+
+  if (auto_mode)
+  {
+    // Census: every adjacent edge pair, classify each corner by its turn axis.
+    // |axis.z| ~ 1 => the turn happens in the XY plane; ~0 => vertical plane.
+    const double tol = 5e-4;
+    CornerPolicy policy;
+    policy.max_deviation = dev_mm * 1e-3;
+    policy.orient_window = window_mm * 1e-3;
+
+    int xy = 0, vertical = 0, oblique = 0, pairs = 0, no_corner = 0;
+    std::vector<std::string> xy_examples, other_examples;
+    for (std::size_t i = 0; i < model->edges.size(); ++i)
+      for (std::size_t j = i + 1; j < model->edges.size(); ++j)
+      {
+        const auto &a = model->edges[i], &b = model->edges[j];
+        const bool touch = (a.polyline.front() - b.polyline.front()).norm() <= tol ||
+                           (a.polyline.front() - b.polyline.back()).norm() <= tol ||
+                           (a.polyline.back() - b.polyline.front()).norm() <= tol ||
+                           (a.polyline.back() - b.polyline.back()).norm() <= tol;
+        if (!touch)
+          continue;
+        const auto sm = buildSeam(model->edges, { a.index, b.index }, tol);
+        if (!sm.ok || sm.polyline.size() < 3)
+          continue;
+        ++pairs;
+        EdgeFrameGenerator::Config cfg;
+        cfg.orientation_mode = EdgeFrameGenerator::ORIENTATION_TANGENT;
+        cfg.tangent_tilt = 0.6;
+        const auto fr = EdgeFrameGenerator::generate(sm.polyline, cfg);
+        const auto plan = blendCorners(sm.polyline, fr, policy);
+        if (plan.corners.empty())
+        {
+          ++no_corner;
+          continue;
+        }
+        for (const auto& c : plan.corners)
+        {
+          const auto& pl = sm.polyline;
+          if (c.vertex == 0 || c.vertex + 1 >= pl.size())
+            continue;
+          const Eigen::Vector3d u = (pl[c.vertex] - pl[c.vertex - 1]).normalized();
+          const Eigen::Vector3d v = (pl[c.vertex + 1] - pl[c.vertex]).normalized();
+          Eigen::Vector3d ax = u.cross(v);
+          if (ax.norm() < 1e-9)
+            continue;
+          ax.normalize();
+          char buf[220];
+          std::snprintf(buf, sizeof(buf),
+                        "#%u+#%u at (%.2f,%.2f,%.2f) turn %.0f deg axis|z|=%.2f", a.index, b.index,
+                        c.position.x(), c.position.y(), c.position.z(), c.turn_deg,
+                        std::fabs(ax.z()));
+          if (std::fabs(ax.z()) > 0.9)
+          {
+            ++xy;
+            if (xy_examples.size() < 6)
+              xy_examples.emplace_back(buf);
+          }
+          else if (std::fabs(ax.z()) < 0.3)
+          {
+            ++vertical;
+            if (other_examples.size() < 6)
+              other_examples.emplace_back(buf);
+          }
+          else
+          {
+            ++oblique;
+            if (other_examples.size() < 6)
+              other_examples.emplace_back(buf);
+          }
+        }
+      }
+    std::printf("adjacent pairs merged: %d (no corner: %d)\n", pairs, no_corner);
+    std::printf("corners: XY-plane %d, vertical-plane %d, oblique %d\n", xy, vertical, oblique);
+    std::printf("\nXY-plane examples:\n");
+    for (const auto& e : xy_examples)
+      std::printf("  %s\n", e.c_str());
+    std::printf("\nnon-XY examples:\n");
+    for (const auto& e : other_examples)
+      std::printf("  %s\n", e.c_str());
+    return 0;
+  }
+
   const auto seam = buildSeam(model->edges, idx);
   if (!seam.ok)
   {
