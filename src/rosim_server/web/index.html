@@ -1729,7 +1729,9 @@ function onJson(j) {
       $("speed").value = j.speed_scale;
       $("speed_val").textContent = Number(j.speed_scale).toFixed(2);
       $("planner").value = j.planner;
-      $("btn_follow").disabled = (selectedEdge < 0);
+      // A seam selection clears selected_edge on the server, so testing the
+      // edge alone disabled the button right after picking a seam.
+      $("btn_follow").disabled = (selectedEdge < 0 && selectedSeam < 0);
       if (j.file_path) $("file_path").value = j.file_path;
       highlightEdge(selectedEdge);
       break;
@@ -1912,9 +1914,9 @@ $("show_samples").onchange = () => renderSamples(lastSamples);
 $("btn_clear_tcp").onclick = () => send({ type: "clear_tcp_path" });
 
 $("btn_follow").onclick = () => {
-  markFollowRunning(true);
   const sm = seams.find((s) => s.id === selectedSeam);
   if (!sm && selectedEdge < 0) return;
+  markFollowRunning(true);
   const modeSel = parseInt($("orientation_mode").value, 10);
   const payload = {
     type: "follow",

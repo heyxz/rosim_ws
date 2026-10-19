@@ -97,7 +97,7 @@ def generate_launch_description():
             robot_description,
             robot_description_semantic,
             {"ws_address": "0.0.0.0"},
-            {"ws_port": 8765},
+            {"ws_port": LaunchConfiguration("ws_port")},
             {"fps": 12},
             {"width": 1280},
             {"height": 720},
@@ -117,6 +117,9 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("use_rviz", default_value="false"),
+        # Configurable so a second instance (tests, side-by-side runs) does not
+        # collide with the service on 8765.
+        DeclareLaunchArgument("ws_port", default_value="8765"),
         rsp,
         control_node,
         jsb_spawner,

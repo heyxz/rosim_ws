@@ -737,6 +737,20 @@ void ServerNode::handleFollow(const nlohmann::json& j)
   options.goal_response_callback = [this](std::shared_ptr<FollowGoalHandle> handle) {
     broadcastJson(statusJson(static_cast<bool>(handle),
                              handle ? "follow goal accepted" : "follow goal rejected (busy or bad edge)"));
+    if (!handle)
+    {
+      // A rejected goal never produces a result callback, so the UI would wait
+      // forever and keep its overlays hidden. Send a synthetic result.
+      follow_active_ = false;
+      nlohmann::json r;
+      r["type"] = "follow_result";
+      r["success"] = false;
+      r["error_code"] = 0;
+      r["message"] = "follow rejected (planning node busy or edge invalid)";
+      r["cartesian_fraction"] = 0.0;
+      r["direction_used"] = 255;
+      broadcastJson(std::move(r));
+    }
   };
   options.feedback_callback =
       [this](std::shared_ptr<FollowGoalHandle>,
@@ -1811,6 +1825,24 @@ void ServerNode::handleFollowSeams(const nlohmann::json& j)
   options.goal_response_callback = [this](const std::shared_ptr<FollowSeamsGoalHandle> handle) {
     broadcastJson(statusJson(static_cast<bool>(handle),
                              handle ? "seam batch accepted" : "seam batch rejected (busy?)"));
+    if (!handle)
+    {
+      // Same as the single-edge path: without a result the run button stays
+      // disabled and the seam overlays never come back.
+      {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        follow_active_ = false;
+      }
+      nlohmann::json r;
+      r["type"] = "seams_result";
+      r["success"] = false;
+      r["executed"] = 0;
+      r["failed"] = 0;
+      r["message"] = "seam batch rejected (planning node busy)";
+      r["failed_ids"] = nlohmann::json::array();
+      r["failed_messages"] = nlohmann::json::array();
+      broadcastJson(std::move(r));
+    }
   };
   options.feedback_callback = [this](std::shared_ptr<FollowSeamsGoalHandle>,
                                      const std::shared_ptr<const FollowSeamsAction::Feedback> fb) {

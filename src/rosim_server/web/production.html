@@ -199,6 +199,20 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+
+// 工艺配方（按产品固定，不暴露给操作员）。默认值与调试页调好的组合一致：
+// 双 S 时间规划 + 焊缝段匀速 20 mm/s + 起收弧各停留 0.5 s + 切线姿态。
+const RECIPE = {
+  time_profile: 1,             // 0 = TOTG, 1 = 双S
+  seam_constant_speed: true,
+  weld_speed: 0.020,           // m/s
+  seam_dwell: 0.5,             // s
+  orientation_mode: 0,         // 0 = 切线
+  tangent_tilt: 0.6,
+  corner_max_deviation: 0.0005,
+  corner_threshold_deg: 8,
+  corner_orient_window: 0.02,
+};
 let ws = null;
 let selectedEdge = -1;     // legacy: raw edge index (geometry only)
 let selectedSeam = -1;     // seam id currently highlighted
@@ -621,10 +635,10 @@ $("btn_start").onclick = () => {
   setPhase("run", "运行中 · 发送指令…");
   setBadge("run", "运行中");
   updateButtons();
-  // Weld params come from the process recipe, not the operator: the server
-  // applies the tangent orientation with a safe lead angle and no offset.
-  // Production runs the whole seam program in list order.
-  send({ type: "follow_seams", ids: seams.map((x) => x.id) });
+  // Weld params come from the process recipe, not the operator. They MUST be
+  // sent explicitly: the server defaults to TOTG / no constant speed / zero
+  // weld speed, which silently ignored everything tuned in the debug page.
+  send({ type: "follow_seams", ids: seams.map((x) => x.id), ...RECIPE });
 };
 $("btn_stop").onclick = () => {
   send({ type: "stop" });

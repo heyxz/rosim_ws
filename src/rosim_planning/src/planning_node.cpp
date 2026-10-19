@@ -1211,9 +1211,23 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
       continue;
     }
 
-    // A single seam is used verbatim: it already carries the weld profile
-    // (constant seam speed, corner slowdowns, strike/extinguish ramps).
-    combined = *outcome.trajectory;
+    if (single_seam)
+    {
+      // A single seam is used verbatim: it already carries the weld profile
+      // (constant seam speed, corner slowdowns, strike/extinguish ramps).
+      combined = *outcome.trajectory;
+    }
+    else
+    {
+      // Multi-seam: append. The first waypoint of this seam is the pose the
+      // previous one ended at (both are `current`), so drop it.
+      for (std::size_t k = 0; k < outcome.trajectory->size(); ++k)
+      {
+        if (k == 0 && combined.size() > 0)
+          continue;
+        combined.addSuffixWayPoint(outcome.trajectory->getWayPoint(k), 0.0);
+      }
+    }
     current = outcome.trajectory->getLastWayPoint();
     scene_->setCurrentState(current);
     ++executed;
