@@ -303,6 +303,31 @@
   }
   .picker-head span { color: var(--accent-2); font-family: var(--mono); }
   #edge_picker #edges { max-height: 52vh; }
+  .seg {
+    display: flex; gap: 4px; background: #0b1017; border: 1px solid #202a36;
+    border-radius: 8px; padding: 3px; margin-bottom: 8px;
+  }
+  .seg button {
+    flex: 1; height: 26px; border: none; background: transparent; color: var(--dim);
+    font-size: 12px; border-radius: 6px; box-shadow: none;
+  }
+  .seg button.on {
+    background: #1d2836; color: #e6ecf4;
+    box-shadow: 0 0 0 1px rgba(53, 182, 255, .35) inset;
+  }
+  .jog-row {
+    display: grid; grid-template-columns: 1fr 78px 1fr; gap: 6px;
+    align-items: center; margin-bottom: 5px;
+  }
+  .jog-row .val {
+    text-align: center; font: 11.5px var(--mono); padding: 5px 0;
+    background: #0b1017; border: 1px solid #202a36; border-radius: 6px;
+    color: #dbe4ef; white-space: nowrap; overflow: hidden;
+  }
+  .jog-row .jogb { height: 26px; padding: 0; font-size: 12px; }
+  .jog-row .jogb.active {
+    background: rgba(53, 182, 255, .22); border-color: var(--accent); color: #eaf6ff;
+  }
   #edges li .chk {
     accent-color: var(--accent);
     width: 15px; height: 15px; flex: 0 0 15px; margin: 0; padding: 0;
@@ -539,32 +564,16 @@
     </section>
 
     <section>
-      <h2>运动</h2>
-      <label for="mv_x">移动到位姿 x/y/z（姿态=单位四元数）</label>
-      <div class="row">
-        <input id="mv_x" type="number" step="0.01" placeholder="x" />
-        <input id="mv_y" type="number" step="0.01" placeholder="y" />
-        <input id="mv_z" type="number" step="0.01" placeholder="z" />
+      <h2>JOG 手动</h2>
+      <div class="seg" id="jog_mode">
+        <button data-mode="joint" class="on">轴运动</button>
+        <button data-mode="cartesian">笛卡尔</button>
       </div>
-      <div class="row" style="margin-top:9px">
-        <button id="btn_home">回零 GoHome</button>
-        <button id="btn_move">执行移动</button>
-      </div>
-      <label for="jog_joint">关节微调</label>
-      <div class="row jog">
-        <select id="jog_joint">
-          <option value="j1">j1</option>
-          <option value="j2">j2</option>
-          <option value="j3">j3</option>
-          <option value="j4">j4</option>
-          <option value="j5">j5</option>
-          <option value="j6">j6</option>
-          <option value="rail_joint">rail_joint (m)</option>
-        </select>
-        <input id="jog_delta" type="number" step="0.05" value="0.1" />
-        <button id="btn_jog_plus" class="jog-btn" title="正向微调">＋</button>
-        <button id="btn_jog_minus" class="jog-btn" title="反向微调">−</button>
-      </div>
+      <label for="jog_speed">JOG 速度 <span id="jog_speed_val">1.0×</span></label>
+      <input id="jog_speed" type="range" min="0.2" max="3" step="0.1" value="1" />
+      <div id="jog_rows"></div>
+      <button id="btn_home" style="width:100%; margin-top:10px">回零 GoHome</button>
+      <div class="note">按住按钮持续运动，松开立即停止。</div>
     </section>
 
     <section>
@@ -601,6 +610,12 @@ let selectedSeam = -1;
 let pickingEdges = false;    // edge picker (seam creation) open
 const pickedEdges = new Set();
 const selectedSeamIds = new Set();   // multi-select for batch execution
+let jogMode = "joint";               // "joint" | "cartesian"
+let jogTimer = null;                 // press-and-hold repeat
+const JOG_INTERVAL = 180;            // ms between jog steps
+const JOINT_NAMES = ["j1", "j2", "j3", "j4", "j5", "j6"];
+const CART_LABELS = ["x", "y", "z", "a", "b", "c"];
+const jogState = { joints: {}, tcp: [0, 0, 0, 0, 0, 0] };
 let dragSeamId = null;               // seam being dragged for reordering
 
 // ---- three.js viewer -------------------------------------------------------
@@ -884,6 +899,9 @@ function frameWorkpiece() {
 }
 
 function onRobotState(j) {
+  if (j.joints) for (const { name, value } of j.joints) jogState.joints[name] = value;
+  if (j.tcp) jogState.tcp = j.tcp;
+  updateJogValues();
   for (const link of j.links || []) {
     const shapes = linkShapes.get(link.name);
     if (!shapes) continue;
@@ -1218,6 +1236,74 @@ function closePicker() {
   $("btn_new_seam").disabled = false;
 }
 
+// Jog panel ---------------------------------------------------------------
+function renderJogRows() {
+  const host = $("jog_rows");
+  if (!host) return;
+  host.innerHTML = "";
+  for (let i = 0; i < 6; i++) {
+    const label = jogMode === "joint" ? JOINT_NAMES[i] : CART_LABELS[i];
+    const row = document.createElement("div");
+    row.className = "jog-row";
+    row.innerHTML =
+      `<button class="jogb" data-dir="-1">${label} −</button>` +
+      `<div class="val" id="jogv_${i}">--</div>` +
+      `<button class="jogb" data-dir="1">${label} ＋</button>`;
+    host.appendChild(row);
+    row.querySelector('[data-dir="-1"]').addEventListener("pointerdown", (ev) => startJog(ev, i, -1));
+    row.querySelector('[data-dir="1"]').addEventListener("pointerdown", (ev) => startJog(ev, i, 1));
+  }
+  updateJogValues();
+}
+
+function startJog(ev, axis, dir) {
+  ev.preventDefault();
+  const btn = ev.currentTarget;
+  if (jogTimer) return;
+  btn.classList.add("active");
+  try { btn.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic events */ }
+  jogStep(axis, dir);
+  jogTimer = setInterval(() => jogStep(axis, dir), JOG_INTERVAL);
+  const stop = () => {
+    if (jogTimer) { clearInterval(jogTimer); jogTimer = null; }
+    btn.classList.remove("active");
+    btn.removeEventListener("pointerup", stop);
+    btn.removeEventListener("pointerleave", stop);
+    btn.removeEventListener("pointercancel", stop);
+  };
+  btn.addEventListener("pointerup", stop);
+  btn.addEventListener("pointerleave", stop);
+  btn.addEventListener("pointercancel", stop);
+}
+
+function jogStep(axis, dir) {
+  const speed = parseFloat($("jog_speed").value) || 1;
+  if (jogMode === "joint") {
+    send({ type: "jog_joint", joint_name: JOINT_NAMES[axis], delta: dir * 0.05 * speed });
+  } else {
+    // 5 mm / 0.4 deg base step: small enough to be precise, large enough that
+    // acceleration limits don't make a held button crawl.
+    const base = axis < 3 ? 0.005 : 0.007;
+    send({ type: "jog_cartesian", axis, delta: dir * base * speed });
+  }
+}
+
+function updateJogValues() {
+  for (let i = 0; i < 6; i++) {
+    const el = $("jogv_" + i);
+    if (!el) continue;
+    if (jogMode === "joint") {
+      const v = jogState.joints[JOINT_NAMES[i]];
+      el.textContent = (v == null) ? "--" :
+        (v * 180 / Math.PI).toFixed(1) + "°";
+    } else {
+      const v = jogState.tcp[i];
+      el.textContent = (v == null) ? "--" :
+        (i < 3 ? (v * 1000).toFixed(0) + " mm" : (v * 180 / Math.PI).toFixed(1) + "°");
+    }
+  }
+}
+
 // Seam list ---------------------------------------------------------------
 function renderSeams() {
   const ul = $("seams");
@@ -1370,6 +1456,8 @@ function onJson(j) {
       onRobotState(j);
       break;
     case "status":
+      // Jog acks arrive ~5 Hz; only surface failures.
+      if (/jog/i.test(j.message) && j.ok) break;
       log(j.message, j.ok ? "ok" : "err");
       if (!j.ok && wpMovePending &&
           /move workpiece|set_workpiece_pose|import/.test(j.message || "")) {
@@ -1462,6 +1550,18 @@ $("btn_follow").onclick = () => {
 };
 
 $("direction").onchange = () => highlightEdge(selectedEdge);  // 起焊点绿点跟着方向走
+document.querySelectorAll("#jog_mode button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll("#jog_mode button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    jogMode = b.dataset.mode;
+    renderJogRows();
+  };
+});
+$("jog_speed").oninput = () => {
+  $("jog_speed_val").textContent = Number($("jog_speed").value).toFixed(1) + "×";
+};
+
 $("btn_new_seam").onclick = () => openPicker();
 $("btn_pick_cancel").onclick = () => closePicker();
 $("btn_pick_ok").onclick = () => {
@@ -1493,23 +1593,13 @@ $("btn_run_seams").onclick = () => {
 
 $("btn_stop").onclick = () => send({ type: "stop" });
 $("btn_home").onclick = () => send({ type: "go_home" });
-$("btn_move").onclick = () => {
-  const x = parseFloat($("mv_x").value), y = parseFloat($("mv_y").value), z = parseFloat($("mv_z").value);
-  if (isNaN(x) || isNaN(y) || isNaN(z)) { log("请输入 x/y/z", "err"); return; }
-  send({ type: "move_to_pose", pose: { position: { x, y, z }, orientation: { x: 0, y: 0, z: 0, w: 1 } } });
-};
-$("btn_jog_plus").onclick = () => jog(+1);
-$("btn_jog_minus").onclick = () => jog(-1);
-function jog(sign) {
-  const d = (parseFloat($("jog_delta").value) || 0.1) * sign;
-  send({ type: "jog_joint", joint_name: $("jog_joint").value, delta: d });
-}
 $("speed").oninput = () => {
   $("speed_val").textContent = Number($("speed").value).toFixed(2);
   send({ type: "set_speed", scale: parseFloat($("speed").value) });
 };
 $("planner").onchange = () => send({ type: "set_planner", planner_type: $("planner").value });
 
+renderJogRows();
 initViewer();
 connect();
 </script>

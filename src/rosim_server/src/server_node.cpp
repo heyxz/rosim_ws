@@ -33,6 +33,7 @@ using GoHome = rosim_interfaces::srv::GoHome;
 using MoveToPose = rosim_interfaces::srv::MoveToPose;
 using MoveWorkpiece = rosim_interfaces::srv::MoveWorkpiece;
 using JogJoint = rosim_interfaces::srv::JogJoint;
+using JogCartesian = rosim_interfaces::srv::JogCartesian;
 using SetSpeedScale = rosim_interfaces::srv::SetSpeedScale;
 using SetPlanner = rosim_interfaces::srv::SetPlanner;
 using CreateSeam = rosim_interfaces::srv::CreateSeam;
@@ -276,6 +277,7 @@ void ServerNode::setupClients()
   move_workpiece_client_ =
       create_client<MoveWorkpiece>("/rosim_planning/move_workpiece");
   jog_joint_client_ = create_client<JogJoint>("/rosim_planning/jog_joint");
+  jog_cartesian_client_ = create_client<JogCartesian>("/rosim_planning/jog_cartesian");
   speed_client_ = create_client<SetSpeedScale>("/rosim_planning/set_speed_scale");
   planner_client_ = create_client<SetPlanner>("/rosim_planning/set_planner");
   create_seam_client_ = create_client<CreateSeam>("/rosim_planning/create_seam");
@@ -408,6 +410,8 @@ void ServerNode::onWsMessage(const std::string& text, std::function<void(bool)> 
     handleSetWorkpiecePose(j);
   else if (type == "jog_joint")
     handleJogJoint(j);
+  else if (type == "jog_cartesian")
+    handleJogCartesian(j);
   else if (type == "set_speed")
     handleSetSpeed(j);
   else if (type == "set_planner")
@@ -697,6 +701,26 @@ void ServerNode::handleJogJoint(const nlohmann::json& j)
       });
 }
 
+void ServerNode::handleJogCartesian(const nlohmann::json& j)
+{
+  auto req = std::make_shared<JogCartesian::Request>();
+  req->axis = static_cast<uint8_t>(j.value("axis", 0));
+  req->delta = j.value("delta", 0.0);
+  if (req->axis > 5 || std::fabs(req->delta) < 1e-9)
+  {
+    sendError("jog_cartesian: need axis 0..5 and a non-zero delta");
+    return;
+  }
+  jog_cartesian_client_->async_send_request(
+      req, [this](rclcpp::Client<JogCartesian>::SharedFuture future) {
+        auto resp = future.get();
+        // Successful jogs are silent: the UI follows the joint stream and
+        // would otherwise be flooded at ~10 Hz. Failures must be visible.
+        if (!resp->success)
+          broadcastJson(statusJson(false, resp->message));
+      });
+}
+
 void ServerNode::handleSetSpeed(const nlohmann::json& j)
 {
   auto req = std::make_shared<SetSpeedScale::Request>();
@@ -911,6 +935,27 @@ nlohmann::json ServerNode::robotStateJson()
     }
   }
   j["links"] = std::move(links);
+
+  // Joint values and TCP pose for the jog panel (same 12 Hz stream, tiny payload).
+  nlohmann::json joints = nlohmann::json::array();
+  if (model_ && display_state_)
+  {
+    for (const auto& name : model_->getVariableNames())
+    {
+      nlohmann::json o;
+      o["name"] = name;
+      o["value"] = display_state_->getVariablePosition(name);
+      joints.push_back(std::move(o));
+    }
+    if (model_->hasLinkModel("tool_tip"))
+    {
+      const Eigen::Isometry3d tf = display_state_->getGlobalLinkTransform("tool_tip");
+      const Eigen::Vector3d rpy = tf.linear().eulerAngles(0, 1, 2);
+      j["tcp"] = { tf.translation().x(), tf.translation().y(), tf.translation().z(),
+                   rpy.x(), rpy.y(), rpy.z() };
+    }
+  }
+  j["joints"] = std::move(joints);
   return j;
 }
 

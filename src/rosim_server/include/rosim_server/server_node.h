@@ -25,6 +25,7 @@
 #include <rosim_interfaces/srv/create_seam.hpp>
 #include <rosim_interfaces/srv/go_home.hpp>
 #include <rosim_interfaces/srv/import_model.hpp>
+#include <rosim_interfaces/srv/jog_cartesian.hpp>
 #include <rosim_interfaces/srv/jog_joint.hpp>
 #include <rosim_interfaces/srv/move_to_pose.hpp>
 #include <rosim_interfaces/srv/move_workpiece.hpp>
@@ -81,6 +82,7 @@ private:
   void handleMoveToPose(const nlohmann::json& j);
   void handleSetWorkpiecePose(const nlohmann::json& j);
   void handleJogJoint(const nlohmann::json& j);
+  void handleJogCartesian(const nlohmann::json& j);
   void handleSetSpeed(const nlohmann::json& j);
   void handleSetPlanner(const nlohmann::json& j);
   void handleGetState(const nlohmann::json& j);
@@ -191,6 +193,7 @@ private:
   rclcpp::Client<rosim_interfaces::srv::MoveToPose>::SharedPtr move_to_pose_client_;
   rclcpp::Client<rosim_interfaces::srv::MoveWorkpiece>::SharedPtr move_workpiece_client_;
   rclcpp::Client<rosim_interfaces::srv::JogJoint>::SharedPtr jog_joint_client_;
+  rclcpp::Client<rosim_interfaces::srv::JogCartesian>::SharedPtr jog_cartesian_client_;
   rclcpp::Client<rosim_interfaces::srv::SetSpeedScale>::SharedPtr speed_client_;
   rclcpp::Client<rosim_interfaces::srv::SetPlanner>::SharedPtr planner_client_;
   rclcpp::Client<rosim_interfaces::srv::CreateSeam>::SharedPtr create_seam_client_;

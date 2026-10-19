@@ -26,6 +26,7 @@
 #include "rosim_interfaces/srv/create_seam.hpp"
 #include "rosim_interfaces/srv/go_home.hpp"
 #include "rosim_interfaces/srv/import_model.hpp"
+#include "rosim_interfaces/srv/jog_cartesian.hpp"
 #include "rosim_interfaces/srv/jog_joint.hpp"
 #include "rosim_interfaces/srv/move_to_pose.hpp"
 #include "rosim_interfaces/srv/move_workpiece.hpp"
@@ -87,6 +88,8 @@ private:
                         const rosim_interfaces::srv::CreateSeam::Response::SharedPtr res);
   void handleJogJoint(const rosim_interfaces::srv::JogJoint::Request::SharedPtr req,
                       const rosim_interfaces::srv::JogJoint::Response::SharedPtr res);
+  void handleJogCartesian(const rosim_interfaces::srv::JogCartesian::Request::SharedPtr req,
+                          const rosim_interfaces::srv::JogCartesian::Response::SharedPtr res);
 
   // ---- action server -------------------------------------------------------
   rclcpp_action::GoalResponse handleGoal(const rclcpp_action::GoalUUID& uuid,
@@ -155,6 +158,7 @@ private:
   rclcpp::Service<rosim_interfaces::srv::GoHome>::SharedPtr go_home_srv_;
   rclcpp::Service<rosim_interfaces::srv::JogJoint>::SharedPtr jog_joint_srv_;
   rclcpp::Service<rosim_interfaces::srv::CreateSeam>::SharedPtr create_seam_srv_;
+  rclcpp::Service<rosim_interfaces::srv::JogCartesian>::SharedPtr jog_cartesian_srv_;
 
   rclcpp_action::Server<FollowEdge>::SharedPtr follow_edge_action_;
   rclcpp_action::Server<FollowSeams>::SharedPtr follow_seams_action_;

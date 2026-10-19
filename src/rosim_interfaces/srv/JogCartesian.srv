@@ -1,0 +1,8 @@
+# Nudge the TCP along/around a world axis by a small delta (cartesian jog).
+# The planner keeps the rail fixed, solves IK for the torch tip, collision-checks
+# the interpolated path and executes the short move.
+uint8 axis        # 0=x 1=y 2=z (translation, m) 3=roll 4=pitch 5=yaw (rad, world axes)
+float64 delta
+---
+bool success
+string message

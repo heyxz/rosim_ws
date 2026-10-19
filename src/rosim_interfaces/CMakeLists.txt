@@ -22,6 +22,7 @@ rosidl_generate_interfaces(
   "srv/GoHome.srv"
   "srv/JogJoint.srv"
   "srv/CreateSeam.srv"
+  "srv/JogCartesian.srv"
   "action/FollowEdge.action"
   "action/FollowSeams.action"
   DEPENDENCIES geometry_msgs trajectory_msgs std_msgs action_msgs

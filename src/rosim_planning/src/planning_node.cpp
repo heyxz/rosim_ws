@@ -219,6 +219,12 @@ void PlanningNode::setupInterfaces()
              const rosim_interfaces::srv::JogJoint::Response::SharedPtr res) {
         handleJogJoint(req, res);
       });
+  jog_cartesian_srv_ = create_service<rosim_interfaces::srv::JogCartesian>(
+      "~/jog_cartesian",
+      [this](const rosim_interfaces::srv::JogCartesian::Request::SharedPtr req,
+             const rosim_interfaces::srv::JogCartesian::Response::SharedPtr res) {
+        handleJogCartesian(req, res);
+      });
   create_seam_srv_ = create_service<rosim_interfaces::srv::CreateSeam>(
       "~/create_seam",
       [this](const rosim_interfaces::srv::CreateSeam::Request::SharedPtr req,
@@ -758,6 +764,104 @@ void PlanningNode::handleJogJoint(const rosim_interfaces::srv::JogJoint::Request
   res->success = true;
   res->message = req->joint_name + " jog " + std::to_string(moved) +
                  (prismatic ? " m executing" : " rad executing");
+}
+
+void PlanningNode::handleJogCartesian(
+    const rosim_interfaces::srv::JogCartesian::Request::SharedPtr req,
+    const rosim_interfaces::srv::JogCartesian::Response::SharedPtr res)
+{
+  if (busy_.exchange(true))
+  {
+    res->success = false;
+    res->message = "another task is running";
+    return;
+  }
+  BusyGuard guard{ busy_ };
+
+  if (req->axis > 5)
+  {
+    res->success = false;
+    res->message = "axis must be 0..5 (x,y,z,roll,pitch,yaw)";
+    return;
+  }
+  const bool rotation = req->axis >= 3;
+  const double max_delta = rotation ? 0.15 : 0.05;  // rad / m per jog step
+  if (std::fabs(req->delta) > max_delta)
+  {
+    res->success = false;
+    res->message = std::string("delta too large (max ") +
+                   (rotation ? "0.15 rad" : "0.05 m") + " per cartesian jog";
+    return;
+  }
+
+  const moveit::core::JointModelGroup* group = model_->getJointModelGroup(group_);
+  const moveit::core::RobotState start = snapshotCurrentState();
+  static const std::string kTip = "tool_tip";  // the torch tip, not tool0
+
+  Eigen::Isometry3d target = start.getGlobalLinkTransform(kTip);
+  if (!rotation)
+  {
+    target.translation()[req->axis] += req->delta;
+  }
+  else
+  {
+    const Eigen::Vector3d axis = Eigen::Vector3d::Unit(req->axis - 3);
+    target.linear() = Eigen::AngleAxisd(req->delta, axis).toRotationMatrix() * target.linear();
+  }
+
+  // Keep the rail where it is: a jog should feel local, not re-station the cell.
+  moveit::core::RobotStatePtr solution;
+  if (!follower_->solveIkMultiSeed(target, start, scene_, solution))
+  {
+    res->success = false;
+    res->message = "target is out of reach or in collision";
+    return;
+  }
+
+  // Collision-check the interpolated joint path (same rule as joint jog).
+  std::vector<double> from, to;
+  start.copyJointGroupPositions(group, from);
+  solution->copyJointGroupPositions(group, to);
+  double max_joint_delta = 0.0;
+  for (std::size_t i = 0; i < from.size(); ++i)
+    max_joint_delta = std::max(max_joint_delta, std::fabs(to[i] - from[i]));
+
+  moveit::core::RobotState probe(start);
+  const auto& names = group->getVariableNames();
+  const int steps = std::max(2, static_cast<int>(std::ceil(max_joint_delta / 0.05)) + 1);
+  for (int k = 1; k <= steps; ++k)
+  {
+    const double s = static_cast<double>(k) / steps;
+    std::vector<double> p(from.size());
+    for (std::size_t i = 0; i < from.size(); ++i)
+      p[i] = from[i] + s * (to[i] - from[i]);
+    probe.setVariablePositions(names, p);
+    probe.update();
+    collision_detection::CollisionRequest creq;
+    collision_detection::CollisionResult cres;
+    scene_->checkCollision(creq, cres, probe);
+    if (cres.collision)
+    {
+      res->success = false;
+      res->message = "jog would collide at " + std::to_string(100 * k / steps) + "% of travel";
+      return;
+    }
+  }
+
+  robot_trajectory::RobotTrajectory traj(model_, group);
+  traj.addSuffixWayPoint(start, 0.0);
+  traj.addSuffixWayPoint(*solution, 0.0);
+  trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+  if (!totg.computeTimeStamps(traj, speed_scale_, speed_scale_))
+  {
+    res->success = false;
+    res->message = "time parameterization failed";
+    return;
+  }
+  publishTrajectory(traj, true);
+  res->success = true;
+  res->message = std::string(rotation ? "cartesian jog " : "cartesian jog ") +
+                 std::to_string(req->delta) + (rotation ? " rad" : " m") + " executing";
 }
 
 // ---------------------------------------------------------------------------
