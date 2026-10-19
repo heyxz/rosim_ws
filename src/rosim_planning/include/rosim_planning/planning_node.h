@@ -122,6 +122,9 @@ private:
   void publishTrajectory(const robot_trajectory::RobotTrajectory& trajectory,
                          bool publish_display);
 
+  /// Re-time a trajectory with a jerk-limited (double-S) profile.
+  bool applyScurve(robot_trajectory::RobotTrajectory& trajectory);
+
   moveit::core::RobotState snapshotCurrentState();
 
   // ---- members -------------------------------------------------------------
@@ -132,6 +135,7 @@ private:
   std::string group_ = "manipulator";
   std::string active_planner_ = "ompl";
   double speed_scale_ = 1.0;
+  double jerk_limit_ = 100.0;  ///< default jerk limit for the S-curve pass [rad/s^3]
 
   std::map<std::string, std::shared_ptr<rosim::core::WorkpieceModel>> workpieces_;
   uint32_t model_counter_ = 0;

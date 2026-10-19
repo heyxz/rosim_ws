@@ -31,6 +31,9 @@ float64 max_waypoint_spacing      # edge sampling spacing [m], default 0.005
 float64 corner_max_deviation      # allowed distance from the seam at a corner [m]; 0 -> 0.5 mm
 float64 corner_threshold_deg      # corners shallower than this are ignored [deg]; 0 -> 8
 float64 corner_orient_window      # +/- window used to spread the corner turn [m]; 0 -> 0.02
+uint8 TIME_PROFILE_TOTG=0        # trapezoidal velocity (default)
+uint8 TIME_PROFILE_SCURVE=1      # jerk-limited (double-S) via Ruckig
+uint8 time_profile               # 0 = TOTG, 1 = 双S
 ---
 bool success
 uint8 ERROR_NONE=0

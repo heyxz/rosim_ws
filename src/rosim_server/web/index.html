@@ -583,6 +583,11 @@
           <input id="spacing" type="number" step="0.001" value="0.005" />
         </div>
       </div>
+      <label for="time_profile" style="margin-top:10px">速度规划</label>
+      <select id="time_profile">
+        <option value="0">梯形速度 (TOTG)</option>
+        <option value="1">双 S（加加速度限幅）</option>
+      </select>
       <label style="margin-top:10px">拐角处理</label>
       <div class="row">
         <div>
@@ -1715,6 +1720,7 @@ $("btn_follow").onclick = () => {
     approach_distance: parseFloat($("approach").value) || 0.08,
     max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
     ...cornerParams(),
+    time_profile: parseInt($("time_profile").value, 10),
   };
   if (sm) payload.edge_indices = sm.parts.map((p) => p.edge_index);
   else payload.edge_index = selectedEdge;
@@ -1762,6 +1768,7 @@ $("btn_run_seams").onclick = () => {
     approach_distance: parseFloat($("approach").value) || 0.08,
     max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
     ...cornerParams(),
+    time_profile: parseInt($("time_profile").value, 10),
   });
   $("btn_run_seams").disabled = true;
   markFollowRunning(true);

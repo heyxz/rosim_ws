@@ -16,6 +16,7 @@
 #include <Eigen/Geometry>
 #include <geometry_msgs/msg/pose.hpp>
 #include <moveit/robot_state/conversions.h>
+#include <moveit/trajectory_processing/ruckig_traj_smoothing.h>
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
 #include <shape_msgs/msg/mesh.h>
 #include <tf2_eigen/tf2_eigen.hpp>
@@ -73,6 +74,8 @@ void PlanningNode::init()
   // IK / 可行性扫描的并行线程数：0=自动(min(hw-2,12))，1=完全串行（老行为），
   // 便于在同一台机器上做 A/B 对比或给别的进程让出核心。
   declare_parameter<int>("ik_threads", 0);
+  declare_parameter<double>("jerk_limit", 100.0);
+  get_parameter("jerk_limit", jerk_limit_);
   // 每次随边任务里允许走几次顺序 walk（1=只在第一次尝试；<=0=每次调用都走，老行为）。
   declare_parameter<int>("ik_walk_attempts", 1);
   // 是否先用一次便宜的「一致性限幅单解」再考虑 walk。
@@ -992,6 +995,8 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
   params.max_waypoint_spacing = goal->max_waypoint_spacing;
   params.velocity_scaling = speed_scale_;
   params.acceleration_scaling = speed_scale_;
+  params.scurve = goal->time_profile == 1;
+  params.jerk_limit = jerk_limit_;
   params.direction = goal->direction;
   params.corner_max_deviation = goal->corner_max_deviation;
   params.corner_threshold_deg = goal->corner_threshold_deg;
@@ -1163,6 +1168,8 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
     params.max_waypoint_spacing = goal->max_waypoint_spacing;
     params.velocity_scaling = speed_scale_;
     params.acceleration_scaling = speed_scale_;
+    params.scurve = goal->time_profile == 1;
+    params.jerk_limit = jerk_limit_;
 
     // Per-seam feedback is mapped into the batch's 0..1 progress.
     auto seam_feedback = [&](float p, const std::string& phase) {
@@ -1211,6 +1218,8 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
     trajectory_processing::TimeOptimalTrajectoryGeneration totg;
     if (!totg.computeTimeStamps(combined, speed_scale_, speed_scale_))
       RCLCPP_WARN(LOGGER, "batch TOTG failed; keeping per-seam timings");
+    if (goal->time_profile == 1)
+      applyScurve(combined);
   }
   catch (const std::exception& e)
   {
@@ -1310,6 +1319,35 @@ bool PlanningNode::monitorTrajectory(const trajectory_msgs::msg::JointTrajectory
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+bool PlanningNode::applyScurve(robot_trajectory::RobotTrajectory& trajectory)
+{
+  const auto* group = trajectory.getGroup();
+  if (!group || trajectory.size() < 3)
+    return false;
+
+  std::unordered_map<std::string, double> vlim, alim, jlim;
+  for (const moveit::core::JointModel* jm : group->getActiveJointModels())
+  {
+    const auto& bounds = jm->getVariableBounds();
+    const auto& names = jm->getVariableNames();
+    const bool prismatic = jm->getType() == moveit::core::JointModel::PRISMATIC;
+    for (std::size_t i = 0; i < names.size() && i < bounds.size(); ++i)
+    {
+      vlim[names[i]] = bounds[i].max_velocity_ * speed_scale_;
+      alim[names[i]] = (bounds[i].max_acceleration_ > 1e-9 ? bounds[i].max_acceleration_ : 1.0) * speed_scale_;
+      jlim[names[i]] = bounds[i].max_jerk_ > 1e-9
+                           ? bounds[i].max_jerk_
+                           : (prismatic ? jerk_limit_ * 0.05 : jerk_limit_);
+    }
+  }
+  if (!trajectory_processing::RuckigSmoothing::applySmoothing(trajectory, vlim, alim, jlim))
+  {
+    RCLCPP_WARN(LOGGER, "Ruckig smoothing failed; keeping the TOTG profile");
+    return false;
+  }
+  return true;
+}
+
 void PlanningNode::publishTrajectory(const robot_trajectory::RobotTrajectory& trajectory,
                                      bool publish_display)
 {

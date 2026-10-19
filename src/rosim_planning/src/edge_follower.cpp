@@ -6,6 +6,10 @@
 
 #include "rosim_planning/edge_follower.h"
 
+#include <moveit/trajectory_processing/ruckig_traj_smoothing.h>
+
+#include <unordered_map>
+
 #include "rosim_core/corner_planner.h"
 #include "rosim_planning/parallel.h"
 
@@ -1168,6 +1172,32 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   trajectory_processing::TimeOptimalTrajectoryGeneration totg;
   if (!totg.computeTimeStamps(*merged, params.velocity_scaling, params.acceleration_scaling))
     return report_error(ErrorCode::ERROR_CARTESIAN, "time parameterization failed");
+
+  if (params.scurve)
+  {
+    // TOTG gives a trapezoidal profile (jerk is infinite at the acceleration
+    // switches); this pass re-times it with a jerk limit, i.e. a double-S
+    // profile. Limits are keyed by *variable* name and are taken from the
+    // robot model (scaled like the caller asked), falling back to jerk_limit.
+    std::unordered_map<std::string, double> vlim, alim, jlim;
+    for (const moveit::core::JointModel* jm : merged->getGroup()->getActiveJointModels())
+    {
+      const auto& bounds = jm->getVariableBounds();
+      const auto& names = jm->getVariableNames();
+      const bool prismatic = jm->getType() == moveit::core::JointModel::PRISMATIC;
+      for (std::size_t i = 0; i < names.size() && i < bounds.size(); ++i)
+      {
+        vlim[names[i]] = bounds[i].max_velocity_ * params.velocity_scaling;
+        alim[names[i]] = (bounds[i].max_acceleration_ > 1e-9 ? bounds[i].max_acceleration_ : 1.0) *
+                         params.acceleration_scaling;
+        jlim[names[i]] = bounds[i].max_jerk_ > 1e-9
+                             ? bounds[i].max_jerk_
+                             : (prismatic ? params.jerk_limit * 0.05 : params.jerk_limit);
+      }
+    }
+    if (!trajectory_processing::RuckigSmoothing::applySmoothing(*merged, vlim, alim, jlim))
+      RCLCPP_WARN(LOGGER, "Ruckig smoothing failed; keeping the TOTG profile");
+  }
 
   outcome.trajectory = std::move(merged);
   outcome.success = true;

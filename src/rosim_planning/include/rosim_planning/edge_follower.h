@@ -46,6 +46,8 @@ struct EdgeFollowParams
   double corner_orient_window = 0.02;   ///< +/- window used to spread the turn [m]
   double velocity_scaling = 1.0;
   double acceleration_scaling = 1.0;
+  bool scurve = false;          ///< true: jerk-limited (double-S) smoothing after TOTG
+  double jerk_limit = 100.0;    ///< revolute jerk limit [rad/s^3] for the S-curve pass
 };
 
 /// \brief Result of a full edge-follow pipeline run.
