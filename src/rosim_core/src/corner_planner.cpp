@@ -89,12 +89,44 @@ CornerPlan blendCorners(const std::vector<Eigen::Vector3d>& polyline,
       is_corner[i] = true;
   }
 
-  // Two corners separated by a very short segment cannot both be blended: the
-  // arcs and their orientation references would overlap. Skip the later one.
+  // Corners that sit within a few samples of each other (typically a 45+45
+  // "S" bend at a chamfered edge) cannot be blended individually: the arcs
+  // would overlap and the second one used to be skipped, leaving a hard turn.
+  // Merge such a cluster into ONE corner with the combined turn and handle it
+  // by rotating in place.
   std::vector<bool> usable = is_corner;
-  for (std::size_t i = 2; i + 1 < n; ++i)
-    if (usable[i] && usable[i - 1])
-      usable[i] = false;
+  std::vector<bool> cluster_pivot(n, false);
+  std::vector<double> in_len(n, 0.0), out_len(n, 0.0);
+  for (std::size_t i = 1; i + 1 < n; ++i)
+  {
+    in_len[i] = (polyline[i] - polyline[i - 1]).norm();
+    out_len[i] = (polyline[i + 1] - polyline[i]).norm();
+  }
+  for (std::size_t i = 1; i + 1 < n;)
+  {
+    if (!usable[i])
+    {
+      ++i;
+      continue;
+    }
+    std::size_t b = i;
+    while (b + 2 < n && usable[b + 1] && (b + 1 - i) <= 3)
+      ++b;
+    if (b > i)
+    {
+      const std::size_t c = (i + b) / 2;
+      const Eigen::Vector3d u = (polyline[i] - polyline[i - 1]).normalized();
+      const Eigen::Vector3d v = (polyline[b + 1] - polyline[b]).normalized();
+      const double cl = std::max(-1.0, std::min(1.0, u.dot(v)));
+      turn[c] = std::acos(cl);
+      for (std::size_t k = i; k <= b; ++k)
+        usable[k] = (k == c);
+      cluster_pivot[c] = true;
+      in_len[c] = (polyline[c] - polyline[i - 1]).norm();
+      out_len[c] = (polyline[b + 1] - polyline[c]).norm();
+    }
+    i = b + 1;
+  }
 
   // ---- pass 2: build the output ------------------------------------------
   std::ostringstream notes;
@@ -130,8 +162,8 @@ CornerPlan blendCorners(const std::vector<Eigen::Vector3d>& polyline,
     const double tan_half = std::tan(half);
     // arc of radius r deviates from the vertex by r * (sec(half) - 1)
     const double sec_minus_1 = 1.0 / std::max(cos_half, 1e-6) - 1.0;
-    const double la = (polyline[i] - polyline[i - 1]).norm();
-    const double lb = (polyline[i + 1] - polyline[i]).norm();
+    const double la = in_len[i] > 0.0 ? in_len[i] : (polyline[i] - polyline[i - 1]).norm();
+    const double lb = out_len[i] > 0.0 ? out_len[i] : (polyline[i + 1] - polyline[i]).norm();
     const double max_t = 0.45 * std::min(la, lb);
 
     double r = sec_minus_1 > 1e-9 ? dev_budget / sec_minus_1 : 0.0;
@@ -139,6 +171,8 @@ CornerPlan blendCorners(const std::vector<Eigen::Vector3d>& polyline,
       r = std::min(r, max_t / tan_half);
     else
       r = 0.0;
+    if (cluster_pivot[i])
+      r = 0.0;  // dense corner cluster: rotate in place, never blend across it
 
     CornerInfo info;
     info.vertex = i;
@@ -157,8 +191,9 @@ CornerPlan blendCorners(const std::vector<Eigen::Vector3d>& polyline,
       info.deviation = 0.0;
       ++out.pivot_count;
       notes << "\n  corner #" << i << " " << fmt(polyline[i]) << ": "
-            << info.turn_deg << " deg has no room for a " << (dev_budget * 1000.0)
-            << " mm blend -> pivot (TCP holds, wrist rotates)";
+            << info.turn_deg << " deg "
+            << (cluster_pivot[i] ? "(merged dense corners)" : "has no room for a blend")
+            << " -> pivot (TCP holds, wrist rotates)";
       if (policy.pivot_fallback)
       {
         const int steps = std::max(
