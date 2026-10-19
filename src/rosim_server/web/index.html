@@ -588,6 +588,15 @@
         <option value="0">梯形速度 (TOTG)</option>
         <option value="1">双 S（加加速度限幅）</option>
       </select>
+      <div class="row" style="margin-top:9px; align-items:flex-end">
+        <label class="check" for="seam_uniform" style="margin:0; flex:1 1 auto">
+          <input id="seam_uniform" type="checkbox" /> 焊缝段匀速
+        </label>
+        <div style="flex:0 0 120px">
+          <label for="weld_speed" style="margin:0">焊速 (mm/s)</label>
+          <input id="weld_speed" type="number" step="1" min="0" value="0" />
+        </div>
+      </div>
       <label style="margin-top:10px">拐角处理</label>
       <div class="row">
         <div>
@@ -1721,6 +1730,8 @@ $("btn_follow").onclick = () => {
     max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
     ...cornerParams(),
     time_profile: parseInt($("time_profile").value, 10),
+    seam_constant_speed: $("seam_uniform").checked,
+    weld_speed: (parseFloat($("weld_speed").value) || 0) / 1000,
   };
   if (sm) payload.edge_indices = sm.parts.map((p) => p.edge_index);
   else payload.edge_index = selectedEdge;
@@ -1769,6 +1780,8 @@ $("btn_run_seams").onclick = () => {
     max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
     ...cornerParams(),
     time_profile: parseInt($("time_profile").value, 10),
+    seam_constant_speed: $("seam_uniform").checked,
+    weld_speed: (parseFloat($("weld_speed").value) || 0) / 1000,
   });
   $("btn_run_seams").disabled = true;
   markFollowRunning(true);

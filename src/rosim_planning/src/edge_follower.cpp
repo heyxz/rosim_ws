@@ -511,6 +511,121 @@ double EdgeFollower::runCartesian(const moveit::core::RobotState& start,
   return fraction;
 }
 
+// Welding needs a constant travel speed *along the seam*, while the robot still
+// has to accelerate from rest somewhere. TOTG/Ruckig put those ramps inside the
+// seam (the first/last centimetres), which shows up as "slow - fast - slow" on
+// the seam. This re-times the seam span at a fixed speed and shifts the rest of
+// the trajectory accordingly; the ramps then live on the approach/depart legs.
+double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& rt,
+                                            const std::vector<Eigen::Isometry3d>& seam_frames,
+                                            double weld_speed)
+{
+  if (seam_frames.size() < 2 || rt.size() < 5)
+    return 0.0;
+
+  // TCP position of every waypoint.
+  std::vector<Eigen::Vector3d> tcp(rt.size());
+  for (std::size_t i = 0; i < rt.size(); ++i)
+    tcp[i] = rt.getWayPoint(i).getGlobalLinkTransform(tip_link_).translation();
+
+  // Seam span: waypoints whose TCP lies on the seam polyline. The approach and
+  // depart legs leave it by more than a millimetre almost immediately.
+  auto frameDist = [&](const Eigen::Vector3d& p) {
+    double best = 1e9;
+    for (const auto& f : seam_frames)
+      best = std::min(best, (p - f.translation()).norm());
+    return best;
+  };
+  long i0 = -1, i1 = -1;
+  for (std::size_t i = 0; i < tcp.size(); ++i)
+    if (frameDist(tcp[i]) < 2e-3)  // corner arcs leave the original vertices by up to max_deviation
+    {
+      if (i0 < 0)
+        i0 = static_cast<long>(i);
+      i1 = static_cast<long>(i);
+    }
+  if (i0 < 0 || i1 - i0 < 3)
+    return 0.0;
+
+  // Arc length along that span.
+  std::vector<double> len(tcp.size(), 0.0);
+  for (std::size_t i = 1; i < tcp.size(); ++i)
+    len[i] = len[i - 1] + (tcp[i] - tcp[i - 1]).norm();
+  const double span_len = len[i1] - len[i0];
+  if (span_len < 1e-4)
+    return 0.0;
+
+  // Target speed: explicit, otherwise the median speed currently on the seam.
+  double v = weld_speed;
+  if (v <= 0.0)
+  {
+    std::vector<double> ds;
+    for (long i = i0 + 1; i <= i1; ++i)
+      ds.push_back((tcp[i] - tcp[i - 1]).norm());
+    std::sort(ds.begin(), ds.end());
+    const double dt = rt.getAverageSegmentDuration();
+    if (dt <= 0.0)
+      return 0.0;
+    v = ds[ds.size() / 2] / dt;
+  }
+  if (v <= 1e-6)
+    return 0.0;
+
+  const auto* group = rt.getGroup();
+  const std::vector<std::string>& vars = group->getVariableNames();
+
+  // Joint velocity check: lower the target speed until every seam step is legal.
+  std::vector<Eigen::VectorXd> q(rt.size());
+  for (std::size_t i = 0; i < rt.size(); ++i)
+  {
+    Eigen::VectorXd vq(vars.size());
+    const moveit::core::RobotState& st = rt.getWayPoint(i);
+    for (std::size_t j = 0; j < vars.size(); ++j)
+      vq[j] = st.getVariablePosition(vars[j]);
+    q[i] = vq;
+  }
+  auto overload = [&](double speed) {
+    for (long i = i0 + 1; i <= i1; ++i)
+    {
+      const double dt = (len[i] - len[i - 1]) / speed;
+      if (dt <= 1e-9)
+        continue;
+      for (std::size_t j = 0; j < vars.size(); ++j)
+      {
+        const auto& b = model_->getVariableBounds(vars[j]);
+        if (b.max_velocity_ > 1e-9 && std::fabs(q[i][j] - q[i - 1][j]) / dt > b.max_velocity_)
+          return true;
+      }
+    }
+    return false;
+  };
+  int guard = 0;
+  while (overload(v) && guard++ < 20)
+    v *= 0.85;
+  if (guard >= 20)
+    return 0.0;
+
+  // Re-time: seam at constant speed, everything after shifted to stay continuous.
+  const double t0 = rt.getWayPointDurationFromStart(static_cast<std::size_t>(i0));
+  std::vector<double> new_t(rt.size());
+  for (std::size_t i = 0; i <= static_cast<std::size_t>(i0); ++i)
+    new_t[i] = rt.getWayPointDurationFromStart(i);
+  for (long i = i0 + 1; i <= i1; ++i)
+    new_t[i] = t0 + (len[i] - len[i0]) / v;
+  const double old_end = rt.getWayPointDurationFromStart(static_cast<std::size_t>(i1));
+  const double shift = new_t[i1] - old_end;
+  for (std::size_t i = static_cast<std::size_t>(i1) + 1; i < rt.size(); ++i)
+    new_t[i] = rt.getWayPointDurationFromStart(i) + shift;
+
+  rt.setWayPointDurationFromPrevious(0, 0.0);
+  for (std::size_t i = 1; i < rt.size(); ++i)
+  {
+    const double dt = new_t[i] - new_t[i - 1];
+    rt.setWayPointDurationFromPrevious(i, dt > 1e-6 ? dt : 1e-6);
+  }
+  return v;
+}
+
 EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
                                         const EdgeFollowParams& params,
                                         const moveit::core::RobotState& current,
@@ -1197,6 +1312,15 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
     }
     if (!trajectory_processing::RuckigSmoothing::applySmoothing(*merged, vlim, alim, jlim))
       RCLCPP_WARN(LOGGER, "Ruckig smoothing failed; keeping the TOTG profile");
+  }
+
+  if (params.seam_constant_speed)
+  {
+    const double v = applySeamConstantSpeed(*merged, tcp_frames, params.weld_speed);
+    if (v > 0.0)
+      RCLCPP_INFO(LOGGER, "seam constant speed: %.1f mm/s", v * 1000.0);
+    else
+      RCLCPP_WARN(LOGGER, "seam constant speed could not be applied; keeping the profile");
   }
 
   outcome.trajectory = std::move(merged);

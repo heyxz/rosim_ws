@@ -34,6 +34,8 @@ float64 corner_orient_window      # +/- window used to spread the corner turn [m
 uint8 TIME_PROFILE_TOTG=0        # trapezoidal velocity (default)
 uint8 TIME_PROFILE_SCURVE=1      # jerk-limited (double-S) via Ruckig
 uint8 time_profile               # 0 = TOTG, 1 = 双S
+bool seam_constant_speed         # keep TCP speed constant on the seam itself
+float64 weld_speed               # target seam speed [m/s]; 0 = keep the profile median
 ---
 bool success
 uint8 ERROR_NONE=0

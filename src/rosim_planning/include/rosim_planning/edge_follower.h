@@ -48,6 +48,8 @@ struct EdgeFollowParams
   double acceleration_scaling = 1.0;
   bool scurve = false;          ///< true: jerk-limited (double-S) smoothing after TOTG
   double jerk_limit = 100.0;    ///< revolute jerk limit [rad/s^3] for the S-curve pass
+  bool seam_constant_speed = false;  ///< keep the TCP speed constant *on the seam*
+  double weld_speed = 0.0;            ///< target seam speed [m/s]; 0 = keep the profile's median
 };
 
 /// \brief Result of a full edge-follow pipeline run.
@@ -117,6 +119,13 @@ public:
   /// \param current     current robot state (start)
   /// \param scene       planning scene containing the workpiece
   /// \param cancel      checked between phases; returns ERROR_CANCELED if set
+  /// Re-time the seam portion of `rt` so the TCP travels at a constant speed.
+  /// The acceleration/deceleration ramps are pushed onto the approach/depart
+  /// segments. Returns the achieved speed (m/s) or 0 when it could not apply.
+  double applySeamConstantSpeed(robot_trajectory::RobotTrajectory& rt,
+                                const std::vector<Eigen::Isometry3d>& seam_frames,
+                                double weld_speed);
+
   EdgeFollowOutcome execute(const rosim::core::EdgeData& edge,
                             const EdgeFollowParams& params,
                             const moveit::core::RobotState& current,
