@@ -62,6 +62,7 @@ struct EdgeFollowOutcome
   std::string message;
   std::unique_ptr<robot_trajectory::RobotTrajectory> trajectory;  ///< full timed plan
   std::vector<Eigen::Isometry3d> toolpath;  ///< TCP frames along the edge (RL obs / viz)
+  std::vector<Eigen::Isometry3d> planned_samples;  ///< approach + seam + depart samples
   uint8_t direction_used = 255;  ///< 0 forward, 1 reverse, 255 none (mirrors the action)
   std::size_t corner_count = 0;       ///< corners detected on the seam
   std::size_t corner_pivot_count = 0; ///< corners handled by in-place rotation

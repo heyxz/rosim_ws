@@ -541,14 +541,30 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
       best = std::min(best, (p - f.translation()).norm());
     return best;
   };
+  // The approach's last waypoint and the seam's first one are the same pose, so
+  // match the seam end points exactly. A distance band (the previous approach)
+  // starts to include approach points once the sampling gets dense, which puts
+  // the strike dwell a few waypoints too late.
   long i0 = -1, i1 = -1;
-  for (std::size_t i = 0; i < tcp.size(); ++i)
-    if (frameDist(tcp[i]) < 2e-3)
-    {
-      if (i0 < 0)
-        i0 = static_cast<long>(i);
+  for (std::size_t i = 0; i < tcp.size() && i0 < 0; ++i)
+    if ((tcp[i] - seam_frames.front().translation()).norm() < 1e-4)
+      i0 = static_cast<long>(i);
+  for (std::size_t i = tcp.size(); i-- > 0 && i1 < 0;)
+    if ((tcp[i] - seam_frames.back().translation()).norm() < 1e-4)
       i1 = static_cast<long>(i);
-    }
+  if (i0 < 0 || i1 < 0)
+  {
+    // Fallback: proximity band, for callers whose frames do not sit exactly on
+    // the trajectory (e.g. an offset TCP).
+    i0 = i1 = -1;
+    for (std::size_t i = 0; i < tcp.size(); ++i)
+      if (frameDist(tcp[i]) < 2e-3)
+      {
+        if (i0 < 0)
+          i0 = static_cast<long>(i);
+        i1 = static_cast<long>(i);
+      }
+  }
   if (i0 < 0 || i1 - i0 < 3)
     return 0.0;
 
@@ -680,7 +696,7 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     robot_trajectory::RobotTrajectory sub(model_, rt.getGroup()->getName());
     for (std::size_t i = a; i <= b; ++i)
       sub.addSuffixWayPoint(rt.getWayPoint(i), 0.0);
-    trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+    trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
     if (!totg.computeTimeStamps(sub, vel_scale, acc_scale))
       return ts;
     ts.resize(b - a + 1);
@@ -712,6 +728,8 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     rt.setWayPointDurationFromPrevious(i, dt > 1e-6 ? dt : 1e-6);
   }
 
+  RCLCPP_INFO(LOGGER, "weld profile: seam span idx [%ld, %ld] of %zu, span %.3f m, v=%.1f mm/s, dwell=%.2fs",
+              i0, i1, rt.size(), span, v * 1000.0, dwell);
   // Arc strike / extinguish: hold the torch still at both seam ends. A zero
   // velocity instant is not enough in practice - the process needs the TCP to
   // sit on the point while the arc establishes/extinguishes.
@@ -783,17 +801,29 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   resampled.closed = edge.closed;
   resampled.length = edge.length;
   {
-    // resample from the polyline with uniform spacing (dense already, but cheap)
-    double accumulated = 0.0;
+    // Uniform resampling *with interpolation*: the source polyline can have
+    // 10 mm long segments, and only picking its vertices (the old behaviour)
+    // silently produced a 10 mm, unevenly spaced sample set no matter what
+    // spacing was requested.
     resampled.polyline.push_back(edge.polyline.front());
+    double carried = 0.0;  // distance already consumed since the last sample
     for (size_t i = 1; i < edge.polyline.size(); ++i)
     {
-      accumulated += (edge.polyline[i] - edge.polyline[i - 1]).norm();
-      if (accumulated >= spacing)
+      const Eigen::Vector3d& a = edge.polyline[i - 1];
+      const Eigen::Vector3d& b = edge.polyline[i];
+      const double seg = (b - a).norm();
+      if (seg < 1e-9)
+        continue;
+      const Eigen::Vector3d dir = (b - a) / seg;
+      double t = spacing - carried;  // distance to the next sample inside [a,b]
+      while (t <= seg + 1e-12)
       {
-        resampled.polyline.push_back(edge.polyline[i]);
-        accumulated = 0.0;
+        resampled.polyline.push_back(a + dir * t);
+        t += spacing;
       }
+      carried = seg - (t - spacing);
+      if (carried < 0.0)
+        carried = 0.0;
     }
     if ((resampled.polyline.back() - edge.polyline.back()).norm() > 1e-6)
       resampled.polyline.push_back(edge.polyline.back());
@@ -1198,6 +1228,7 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   waypoints.push_back(approach);  // straight insertion from hover to edge start
   waypoints.insert(waypoints.end(), tcp_frames.begin(), tcp_frames.end());
   waypoints.push_back(depart);
+  outcome.planned_samples = waypoints;  // approach + seam + depart, for the viewer
 
   std::vector<moveit::core::RobotStatePtr> cart_states;
   double fraction = runCartesian(ompl_end, waypoints, scene, cart_states);
@@ -1386,7 +1417,7 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   if (merged->size() < 2)
     return report_error(ErrorCode::ERROR_CARTESIAN, "merged trajectory degenerate");
 
-  trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+  trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
   if (!totg.computeTimeStamps(*merged, params.velocity_scaling, params.acceleration_scaling))
     return report_error(ErrorCode::ERROR_CARTESIAN, "time parameterization failed");
 

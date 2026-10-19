@@ -1540,8 +1540,11 @@ function renderTcpPath(points) {
   // WebGL 的 LineBasicMaterial.linewidth 在绝大多数平台被忽略（永远 1 像素），
   // 所以用管道把轨迹画成有厚度的实体，和焊缝标记同一套画法。
   const curvePts = lastTcpPath.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
-  const curve = new THREE.CatmullRomCurve3(curvePts, false, "centripetal");
-  const segs = Math.min(600, Math.max(24, curvePts.length * 2));
+  // 用折线而不是 Catmull-Rom：样条会在拐点处外凸，把本该笔直的焊缝画弯
+  const curve = new THREE.CurvePath();
+  for (let i = 1; i < curvePts.length; i++)
+    curve.add(new THREE.LineCurve3(curvePts[i - 1], curvePts[i]));
+  const segs = Math.min(600, Math.max(24, curvePts.length));
   const radial = 6;
   const geo = new THREE.TubeGeometry(curve, segs, 0.0016, radial, false);
 

@@ -755,7 +755,7 @@ void PlanningNode::handleJogJoint(const rosim_interfaces::srv::JogJoint::Request
   robot_trajectory::RobotTrajectory traj(model_, group);
   traj.addSuffixWayPoint(start, 0.0);
   traj.addSuffixWayPoint(target, 0.0);
-  trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+  trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
   if (!totg.computeTimeStamps(traj, speed_scale_, speed_scale_))
   {
     res->success = false;
@@ -854,7 +854,7 @@ void PlanningNode::handleJogCartesian(
   robot_trajectory::RobotTrajectory traj(model_, group);
   traj.addSuffixWayPoint(start, 0.0);
   traj.addSuffixWayPoint(*solution, 0.0);
-  trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+  trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
   if (!totg.computeTimeStamps(traj, speed_scale_, speed_scale_))
   {
     res->success = false;
@@ -1023,8 +1023,8 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
   EdgeFollowOutcome outcome = follower_->execute(*edge_ptr, params, start, scene_, cancel_,
                                                  publish_feedback, publish_note);
 
-  planned_samples.reserve(outcome.toolpath.size() * 3);
-  for (const auto& f : outcome.toolpath)
+  planned_samples.reserve(outcome.planned_samples.size() * 3);
+  for (const auto& f : outcome.planned_samples)
   {
     planned_samples.push_back(f.translation().x());
     planned_samples.push_back(f.translation().y());
@@ -1232,7 +1232,7 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
   // slows to a stop at a seam boundary.
   try
   {
-    trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+    trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
     if (!totg.computeTimeStamps(combined, speed_scale_, speed_scale_))
       RCLCPP_WARN(LOGGER, "batch TOTG failed; keeping per-seam timings");
     if (goal->time_profile == 1)

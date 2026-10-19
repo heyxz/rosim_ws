@@ -99,7 +99,7 @@ bool OmplPlanner::plan(const PlanRequest& req, PlanResult& result)
   }
 
   // ---- time parameterization (TOTG) --------------------------------------
-  trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+  trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
   if (!totg.computeTimeStamps(*mres.trajectory_, req.velocity_scaling, req.acceleration_scaling))
   {
     result.error = "time parameterization failed";
