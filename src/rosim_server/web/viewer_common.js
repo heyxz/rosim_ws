@@ -169,6 +169,7 @@ function buildEdgeMarker(points, labelText, color, radius) {
 
   const cssColor = "#" + color.toString(16).padStart(6, "0");
   const label = makeEdgeLabelSprite(labelText, cssColor);
+  label.userData.isLabel = true;  // 跟随过程中会被临时隐藏，避免遮挡 TCP 轨迹
   const mid = curvePts[Math.floor(curvePts.length / 2)];
   label.position.set(mid.x, mid.y, mid.z + 0.035);
   group.add(label);

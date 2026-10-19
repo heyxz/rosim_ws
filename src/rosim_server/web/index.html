@@ -659,6 +659,20 @@ const linkShapes = new Map();   // link name -> [{ mesh, offset: Matrix4 }]
 let edgeMeshes = [];            // [{ mesh: Line, index, points: [x,y,z,...] }]
 let workpieceGroup = null;
 let tcpLine = null, tcpDots = null, tcpStart = null, tcpEnd = null, lastTcpPath = null;
+let followRunning = false;
+
+// 跟随过程中隐藏焊缝标注（Sprite），避免遮挡 TCP 轨迹
+function setSeamLabelsVisible(visible) {
+  for (const root of [seamMarker, selectionMarker]) {
+    if (!root) continue;
+    root.traverse((o) => { if (o.userData && o.userData.isLabel) o.visible = visible; });
+  }
+}
+
+function markFollowRunning(running) {
+  followRunning = running;
+  setSeamLabelsVisible(!running);
+}
 let workpieceSolid = null;      // surface mesh, used to snap clicks to nearby edges
 let selectionMarker = null;     // tube + end caps + label drawn for the selected edge
 let workpiecePose = null;       // last server-confirmed world pose { position, orientation }
@@ -1442,9 +1456,6 @@ function renderTcpPath(points) {
   tcpLine = tcpDots = tcpStart = tcpEnd = null;
   if (!lastTcpPath || lastTcpPath.length < 2 || !$("show_tcp").checked) return;
 
-  const n = lastTcpPath.length;
-  const pos = new Float32Array(n * 3);
-  const col = new Float32Array(n * 3);
   // 第 4 个分量是 TCP 速度，用颜色编码：蓝(慢) -> 青 -> 绿 -> 黄 -> 红(快)
   let vmax = 0;
   for (const p of lastTcpPath) vmax = Math.max(vmax, p[3] || 0);
@@ -1456,20 +1467,28 @@ function renderTcpPath(points) {
     else c.setRGB(0.2 + 1.6 * (t - 0.5), 0.9 - 1.3 * (t - 0.5), 0.4 - 0.4 * (t - 0.5));
     return c;
   };
-  lastTcpPath.forEach((p, i) => {
-    pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2];
-    const c = speedColor(p[3] || 0);
+  // WebGL 的 LineBasicMaterial.linewidth 在绝大多数平台被忽略（永远 1 像素），
+  // 所以用管道把轨迹画成有厚度的实体，和焊缝标记同一套画法。
+  const curvePts = lastTcpPath.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
+  const curve = new THREE.CatmullRomCurve3(curvePts, false, "centripetal");
+  const segs = Math.min(600, Math.max(24, curvePts.length * 2));
+  const radial = 6;
+  const geo = new THREE.TubeGeometry(curve, segs, 0.0016, radial, false);
+
+  // 顶点色：每个管道截面一圈用同一个速度色
+  const perRing = radial + 1;
+  const cnt = geo.attributes.position.count;
+  const col = new Float32Array(cnt * 3);
+  for (let i = 0; i < cnt; i++) {
+    const t = Math.min(1, Math.floor(i / perRing) / segs);
+    const idx = Math.min(lastTcpPath.length - 1, Math.round(t * (lastTcpPath.length - 1)));
+    const c = speedColor(lastTcpPath[idx][3] || 0);
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
-  });
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  }
   geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  tcpLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
+  tcpLine = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+  tcpLine.renderOrder = 22;
   worldGroup.add(tcpLine);
-  // 单像素线在远景下几乎看不见，叠一层同色点云把轨迹“加粗”
-  tcpDots = new THREE.Points(geo, new THREE.PointsMaterial({
-    size: 0.007, vertexColors: true, sizeAttenuation: true }));
-  worldGroup.add(tcpDots);
 
   const dot = (p, color) => {
     const m = new THREE.Mesh(new THREE.SphereGeometry(0.006, 12, 12),
@@ -1495,6 +1514,7 @@ function highlightSeam(sm) {
   const flat = [];
   for (const p of sm.polyline) flat.push(p[0], p[1], p[2]);
   seamMarker = buildEdgeMarker(flat, sm.name, 0x35b6ff, 0.0035);
+  if (followRunning) setSeamLabelsVisible(false);
   if (seamMarker) workpieceGroup.add(seamMarker);
 }
 
@@ -1578,6 +1598,7 @@ function onJson(j) {
       if (j.note) log(j.note, "note");
       break;
     case "seams_result": {
+      markFollowRunning(false);
       $("progress_fill").style.width = j.success ? "100%" : "0";
       const failTxt = j.failed ? `，跳过 ${j.failed} 条` : "";
       $("phase").textContent = (j.success ? "批量完成" : "批量失败") + failTxt;
@@ -1588,6 +1609,7 @@ function onJson(j) {
       break;
     }
     case "follow_result": {
+      markFollowRunning(false);
       $("progress_fill").style.width = j.success ? "100%" : "0";
       const dir = j.direction_used === 0 ? "正向" : j.direction_used === 1 ? "反向" : "";
       const dirTxt = dir ? " · " + dir : "";
@@ -1644,6 +1666,7 @@ $("show_tcp").onchange = () => renderTcpPath(lastTcpPath);
 $("btn_clear_tcp").onclick = () => send({ type: "clear_tcp_path" });
 
 $("btn_follow").onclick = () => {
+  markFollowRunning(true);
   const sm = seams.find((s) => s.id === selectedSeam);
   if (!sm && selectedEdge < 0) return;
   const modeSel = parseInt($("orientation_mode").value, 10);
@@ -1708,9 +1731,10 @@ $("btn_run_seams").onclick = () => {
     ...cornerParams(),
   });
   $("btn_run_seams").disabled = true;
+  markFollowRunning(true);
 };
 
-$("btn_stop").onclick = () => send({ type: "stop" });
+$("btn_stop").onclick = () => { markFollowRunning(false); send({ type: "stop" }); };
 $("btn_home").onclick = () => send({ type: "go_home" });
 $("speed").oninput = () => {
   $("speed_val").textContent = Number($("speed").value).toFixed(2);
