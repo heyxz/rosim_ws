@@ -611,8 +611,14 @@ void ServerNode::handleFollow(const nlohmann::json& j)
   goal.tool_offset = j.value("tool_offset", 0.0);
   goal.approach_distance = j.value("approach_distance", 0.08);
   goal.max_waypoint_spacing = j.value("max_waypoint_spacing", 0.005);
+  goal.corner_max_deviation = j.value("corner_max_deviation", 0.0);
+  goal.corner_threshold_deg = j.value("corner_threshold_deg", 0.0);
+  goal.corner_orient_window = j.value("corner_orient_window", 0.0);
   // 0 auto / 1 forward / 2 reverse (mirrors the action constants).
   goal.direction = static_cast<uint8_t>(j.value("direction", 0));
+  goal.corner_max_deviation = j.value("corner_max_deviation", 0.0);
+  goal.corner_threshold_deg = j.value("corner_threshold_deg", 0.0);
+  goal.corner_orient_window = j.value("corner_orient_window", 0.0);
   if (j.contains("fixed_orientation") && j["fixed_orientation"].is_object())
   {
     goal.fixed_orientation.x = j["fixed_orientation"].value("x", 0.0);

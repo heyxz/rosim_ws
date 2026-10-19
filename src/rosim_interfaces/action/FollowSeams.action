@@ -15,6 +15,7 @@ float64 approach_distance
 float64 max_waypoint_spacing
 float64 corner_max_deviation
 float64 corner_threshold_deg
+float64 corner_orient_window      # +/- window used to spread the corner turn [m]; 0 -> 0.02
 ---
 bool success                  # at least one seam was executed
 uint8 executed

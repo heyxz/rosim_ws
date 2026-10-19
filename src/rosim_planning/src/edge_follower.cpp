@@ -356,7 +356,18 @@ bool EdgeFollower::solveIkMultiSeed(const Eigen::Isometry3d& tool0_pose,
     }
     SeedEval& e = evals[i];
     e.ok = true;
-    e.dist = std::min(dist_seed, dist_home);
+    // Prefer solutions that do not park j4/j6 right at the wrap (+/-pi): those
+    // are legal but force the following Cartesian run across the discontinuity
+    // (observed j4 = -3.48 rad truncating a seam at its first waypoint).
+    double wrap_penalty = 0.0;
+    for (const std::size_t k : { static_cast<std::size_t>(3), static_cast<std::size_t>(5) })
+      if (k < cand_joints.size())
+      {
+        const double a = std::fabs(cand_joints[k]);
+        if (a > 3.0)
+          wrap_penalty += (a - 3.0) * (a - 3.0) * 10.0;
+      }
+    e.dist = std::min(dist_seed, dist_home) + wrap_penalty;
     e.state = std::make_shared<moveit::core::RobotState>(candidate);
     if (e.dist <= 1e-12)
       hit_zero.store(true, std::memory_order_relaxed);
@@ -435,6 +446,24 @@ double EdgeFollower::runCartesian(const moveit::core::RobotState& start,
   // the duration of the chunk (relocations re-station it with OMPL).
   const moveit::core::JointModelGroup* group = model_->getJointModelGroup(arm_group_);
 
+  // Wrist joints 4 and 6 wrap at +/-pi; a Cartesian step that crosses the wrap
+  // cannot be executed continuously, so such states are rejected outright
+  // instead of letting the interpolation die halfway along the seam.
+  constexpr double kWristWrap = 3.0;  // rad (~172 deg)
+  const auto wrist_wrapped = [&group](const moveit::core::RobotState& st) {
+    std::vector<double> q;
+    st.copyJointGroupPositions(group, q);
+    for (const std::size_t k : { static_cast<std::size_t>(3), static_cast<std::size_t>(5) })
+      if (k < q.size() && std::fabs(q[k]) > kWristWrap)
+        return true;
+    return false;
+  };
+
+  // NOTE: wrapped wrist values are *legal* (the joints travel to +/-pi); only a
+  // discontinuous jump across the wrap breaks the Cartesian run, and that is
+  // what MoveIt's JumpThreshold is for. Rejecting |q| > 3.0 here truncated
+  // otherwise-fine seams (edge 45 regressed to 0.73), so the wrap is only
+  // diagnosed, never used as a hard validity test.
   auto validity = [&scene](moveit::core::RobotState* state,
                            const moveit::core::JointModelGroup* /*group*/,
                            const double* /*values*/) {
@@ -443,6 +472,10 @@ double EdgeFollower::runCartesian(const moveit::core::RobotState& start,
   };
 
   moveit::core::RobotState work(start);
+  if (wrist_wrapped(work))
+    RCLCPP_WARN(LOGGER,
+                "cartesian starts on a wrapped wrist branch (j4/j6 near +/-pi); "
+                "the run will truncate early - approach IK should have avoided it");
   EigenSTL::vector_Isometry3d waypoints(tcp_waypoints.begin(), tcp_waypoints.end());
 
   const double fraction = moveit::core::CartesianInterpolator::computeCartesianPath(

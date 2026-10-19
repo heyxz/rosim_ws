@@ -556,6 +556,21 @@
           <input id="spacing" type="number" step="0.001" value="0.005" />
         </div>
       </div>
+      <label style="margin-top:10px">拐角处理</label>
+      <div class="row">
+        <div>
+          <label for="corner_dev">偏离 (mm)</label>
+          <input id="corner_dev" type="number" step="0.1" min="0" value="0.5" />
+        </div>
+        <div>
+          <label for="corner_thr">阈值 (°)</label>
+          <input id="corner_thr" type="number" step="1" min="0" value="8" />
+        </div>
+        <div>
+          <label for="corner_win">姿态窗口 (mm)</label>
+          <input id="corner_win" type="number" step="5" min="0" value="20" />
+        </div>
+      </div>
       <div class="row" style="margin-top:11px">
         <button id="btn_follow" class="primary" disabled>跟随</button>
         <button id="btn_stop" class="danger">停止</button>
@@ -1535,6 +1550,14 @@ $("wp_drag").onchange = () => {
     ($("wp_drag").checked && !wpMovePending) ? "grab" : "";
 };
 
+function cornerParams() {
+  return {
+    corner_max_deviation: (parseFloat($("corner_dev").value) || 0) / 1000,
+    corner_threshold_deg: parseFloat($("corner_thr").value) || 0,
+    corner_orient_window: (parseFloat($("corner_win").value) || 0) / 1000,
+  };
+}
+
 $("btn_follow").onclick = () => {
   const sm = seams.find((s) => s.id === selectedSeam);
   if (!sm && selectedEdge < 0) return;
@@ -1546,6 +1569,7 @@ $("btn_follow").onclick = () => {
     tool_offset: parseFloat($("tool_offset").value) || 0,
     approach_distance: parseFloat($("approach").value) || 0.08,
     max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
+    ...cornerParams(),
   };
   if (sm) payload.edge_indices = sm.parts.map((p) => p.edge_index);
   else payload.edge_index = selectedEdge;
@@ -1590,6 +1614,7 @@ $("btn_run_seams").onclick = () => {
     tool_offset: parseFloat($("tool_offset").value) || 0,
     approach_distance: parseFloat($("approach").value) || 0.08,
     max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
+    ...cornerParams(),
   });
   $("btn_run_seams").disabled = true;
 };

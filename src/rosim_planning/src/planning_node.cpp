@@ -995,6 +995,7 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
   params.direction = goal->direction;
   params.corner_max_deviation = goal->corner_max_deviation;
   params.corner_threshold_deg = goal->corner_threshold_deg;
+  params.corner_orient_window = goal->corner_orient_window;
 
   const auto start = snapshotCurrentState();
   scene_->setCurrentState(start);
@@ -1150,6 +1151,7 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
     params.direction = spec.direction;
     params.corner_max_deviation = goal->corner_max_deviation;
     params.corner_threshold_deg = goal->corner_threshold_deg;
+    params.corner_orient_window = goal->corner_orient_window;
     params.orientation_mode = goal->orientation_mode;
     params.tangent_tilt = goal->tangent_tilt;
     params.tool_offset = goal->tool_offset;
