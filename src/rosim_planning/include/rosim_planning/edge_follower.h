@@ -50,6 +50,7 @@ struct EdgeFollowParams
   double jerk_limit = 100.0;    ///< revolute jerk limit [rad/s^3] for the S-curve pass
   bool seam_constant_speed = false;  ///< keep the TCP speed constant *on the seam*
   double weld_speed = 0.0;            ///< target seam speed [m/s]; 0 = keep the profile's median
+  double seam_dwell = 0.0;            ///< pause at the seam start/end [s] (arc strike/extinguish)
 };
 
 /// \brief Result of a full edge-follow pipeline run.
@@ -124,7 +125,7 @@ public:
   /// segments. Returns the achieved speed (m/s) or 0 when it could not apply.
   double applySeamConstantSpeed(robot_trajectory::RobotTrajectory& rt,
                                 const std::vector<Eigen::Isometry3d>& seam_frames,
-                                double weld_speed);
+                                double weld_speed, double dwell);
 
   EdgeFollowOutcome execute(const rosim::core::EdgeData& edge,
                             const EdgeFollowParams& params,

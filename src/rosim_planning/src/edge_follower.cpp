@@ -516,20 +516,24 @@ double EdgeFollower::runCartesian(const moveit::core::RobotState& start,
 // seam (the first/last centimetres), which shows up as "slow - fast - slow" on
 // the seam. This re-times the seam span at a fixed speed and shifts the rest of
 // the trajectory accordingly; the ramps then live on the approach/depart legs.
+// Welding profile:
+//   approach: rest -> rest (trapezoid)
+//   seam:     0 -> v -> 0, constant v in between (ramps live *inside* the seam
+//             but are only a few mm long; the two ends must be at rest because
+//             the torch strikes / extinguishes the arc there)
+//   depart:   rest -> rest (trapezoid)
+// Returns the achieved seam speed [m/s] or 0 when it could not be applied.
 double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& rt,
                                             const std::vector<Eigen::Isometry3d>& seam_frames,
-                                            double weld_speed)
+                                            double weld_speed, double dwell)
 {
   if (seam_frames.size() < 2 || rt.size() < 5)
     return 0.0;
 
-  // TCP position of every waypoint.
   std::vector<Eigen::Vector3d> tcp(rt.size());
   for (std::size_t i = 0; i < rt.size(); ++i)
     tcp[i] = rt.getWayPoint(i).getGlobalLinkTransform(tip_link_).translation();
 
-  // Seam span: waypoints whose TCP lies on the seam polyline. The approach and
-  // depart legs leave it by more than a millimetre almost immediately.
   auto frameDist = [&](const Eigen::Vector3d& p) {
     double best = 1e9;
     for (const auto& f : seam_frames)
@@ -538,7 +542,7 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
   };
   long i0 = -1, i1 = -1;
   for (std::size_t i = 0; i < tcp.size(); ++i)
-    if (frameDist(tcp[i]) < 2e-3)  // corner arcs leave the original vertices by up to max_deviation
+    if (frameDist(tcp[i]) < 2e-3)
     {
       if (i0 < 0)
         i0 = static_cast<long>(i);
@@ -547,15 +551,14 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
   if (i0 < 0 || i1 - i0 < 3)
     return 0.0;
 
-  // Arc length along that span.
   std::vector<double> len(tcp.size(), 0.0);
   for (std::size_t i = 1; i < tcp.size(); ++i)
     len[i] = len[i - 1] + (tcp[i] - tcp[i - 1]).norm();
-  const double span_len = len[i1] - len[i0];
-  if (span_len < 1e-4)
+  const double span = len[i1] - len[i0];
+  if (span < 1e-4)
     return 0.0;
 
-  // Target speed: explicit, otherwise the median speed currently on the seam.
+  // Target speed: explicit, else the median seam speed of the current profile.
   double v = weld_speed;
   if (v <= 0.0)
   {
@@ -571,10 +574,59 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
   if (v <= 1e-6)
     return 0.0;
 
+  // Ramp at the two seam ends: the TCP must be standing still exactly at the
+  // strike/extinguish points, so the acceleration happens inside the seam over
+  // a short, configurable distance.
+  const double ramp = std::max(1e-3, std::min(0.02, 0.25 * span));
+  const double a_ramp = v * v / (2.0 * ramp);
+  double t_ramp = v / a_ramp;
+  double cruise = span - 2.0 * ramp;
+  if (cruise < 0.0)
+  {
+    // Seam shorter than the two ramps: triangular profile, lower peak speed.
+    cruise = 0.0;
+    const double v_peak = std::sqrt(a_ramp * span);  // keep the same accel
+    v = std::min(v, v_peak);
+    t_ramp = v / a_ramp;
+  }
+  const double seam_time = 2.0 * t_ramp + cruise / v;
+
+  auto seamTimeAt = [&](double s) {
+    if (s <= 0.0)
+      return 0.0;
+    if (s <= ramp)
+      return std::sqrt(2.0 * s / a_ramp);
+    if (s >= span - ramp && ramp > 0.0)
+      return seam_time - std::sqrt(2.0 * std::max(0.0, span - s) / a_ramp);
+    return t_ramp + (s - ramp) / v;
+  };
+
+  // Approach / depart: rest-to-rest trapezoids at a conservative speed.
+  const double v_move = std::max(0.02, std::min(0.3, 2.0 * v));
+  const double a_move = std::max(0.2, 4.0 * a_ramp);
+  auto trapTime = [&](double s, double L) {
+    if (L < 1e-6)
+      return 0.0;
+    double vv = v_move;
+    double d = vv * vv / (2.0 * a_move);
+    if (2.0 * d > L)
+    {
+      vv = std::sqrt(a_move * L);
+      d = vv * vv / (2.0 * a_move);
+    }
+    const double T = (L - 2.0 * d) / vv + 2.0 * (vv / a_move);
+    if (s <= 0.0)
+      return 0.0;
+    if (s <= d)
+      return std::sqrt(2.0 * s / a_move);
+    if (s >= L - d)
+      return T - std::sqrt(2.0 * std::max(0.0, L - s) / a_move);
+    return vv / (2.0 * a_move) + s / vv;
+  };
+
+  // Joint velocity guard: slow the seam down until every step is legal.
   const auto* group = rt.getGroup();
   const std::vector<std::string>& vars = group->getVariableNames();
-
-  // Joint velocity check: lower the target speed until every seam step is legal.
   std::vector<Eigen::VectorXd> q(rt.size());
   for (std::size_t i = 0; i < rt.size(); ++i)
   {
@@ -585,9 +637,21 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     q[i] = vq;
   }
   auto overload = [&](double speed) {
+    const double a_r = speed * speed / (2.0 * ramp);
+    const double tr = speed / std::max(1e-9, a_r);
     for (long i = i0 + 1; i <= i1; ++i)
     {
-      const double dt = (len[i] - len[i - 1]) / speed;
+      const double ds = len[i] - len[i - 1];
+      double dt;
+      if (len[i] - len[i0] <= ramp)
+        dt = std::sqrt(2.0 * std::max(1e-9, len[i] - len[i0]) / a_r) -
+             std::sqrt(2.0 * std::max(0.0, len[i - 1] - len[i0]) / a_r);
+      else if (len[i] - len[i0] >= span - ramp)
+        dt = std::sqrt(2.0 * std::max(0.0, span - (len[i - 1] - len[i0])) / a_r) -
+             std::sqrt(2.0 * std::max(0.0, span - (len[i] - len[i0])) / a_r);
+      else
+        dt = ds / speed;
+      (void)tr;
       if (dt <= 1e-9)
         continue;
       for (std::size_t j = 0; j < vars.size(); ++j)
@@ -600,28 +664,42 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     return false;
   };
   int guard = 0;
-  while (overload(v) && guard++ < 20)
-    v *= 0.85;
-  if (guard >= 20)
+  while (overload(v) && guard++ < 25)
+    v *= 0.9;
+  if (guard >= 25)
     return 0.0;
 
-  // Re-time: seam at constant speed, everything after shifted to stay continuous.
-  const double t0 = rt.getWayPointDurationFromStart(static_cast<std::size_t>(i0));
-  std::vector<double> new_t(rt.size());
-  for (std::size_t i = 0; i <= static_cast<std::size_t>(i0); ++i)
-    new_t[i] = rt.getWayPointDurationFromStart(i);
+  // Rebuild the timing: approach rest->rest, seam 0->v->0, depart rest->rest.
+  std::vector<double> t(rt.size(), 0.0);
+  const double L_pre = len[i0];
+  for (long i = 0; i <= i0; ++i)
+    t[i] = trapTime(len[i], L_pre);
   for (long i = i0 + 1; i <= i1; ++i)
-    new_t[i] = t0 + (len[i] - len[i0]) / v;
-  const double old_end = rt.getWayPointDurationFromStart(static_cast<std::size_t>(i1));
-  const double shift = new_t[i1] - old_end;
+    t[i] = t[i0] + seamTimeAt(len[i] - len[i0]);
+  const double t_end_seam = t[i1];
+  const double L_post = len.back() - len[i1];
   for (std::size_t i = static_cast<std::size_t>(i1) + 1; i < rt.size(); ++i)
-    new_t[i] = rt.getWayPointDurationFromStart(i) + shift;
+    t[i] = t_end_seam + trapTime(len[i] - len[i1], L_post);
 
   rt.setWayPointDurationFromPrevious(0, 0.0);
   for (std::size_t i = 1; i < rt.size(); ++i)
   {
-    const double dt = new_t[i] - new_t[i - 1];
+    const double dt = t[i] - t[i - 1];
     rt.setWayPointDurationFromPrevious(i, dt > 1e-6 ? dt : 1e-6);
+  }
+
+  // Arc strike / extinguish: hold the torch still at both seam ends. A zero
+  // velocity instant is not enough in practice - the process needs the TCP to
+  // sit on the point while the arc establishes/extinguishes.
+  if (dwell > 1e-3)
+  {
+    moveit::core::RobotState start_state = rt.getWayPoint(static_cast<std::size_t>(i0));
+    rt.insertWayPoint(static_cast<std::size_t>(i0) + 1, start_state, dwell);
+    // The start dwell shifted everything after i0 by one, so the seam end now
+    // lives at i1 + 1 (it used to be i1).
+    const std::size_t end_idx = static_cast<std::size_t>(i1) + 1;
+    moveit::core::RobotState end_state = rt.getWayPoint(end_idx);
+    rt.insertWayPoint(end_idx + 1, end_state, dwell);
   }
   return v;
 }
@@ -1316,7 +1394,8 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
 
   if (params.seam_constant_speed)
   {
-    const double v = applySeamConstantSpeed(*merged, tcp_frames, params.weld_speed);
+    const double v =
+        applySeamConstantSpeed(*merged, tcp_frames, params.weld_speed, params.seam_dwell);
     if (v > 0.0)
       RCLCPP_INFO(LOGGER, "seam constant speed: %.1f mm/s", v * 1000.0);
     else

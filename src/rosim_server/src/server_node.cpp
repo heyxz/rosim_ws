@@ -626,6 +626,7 @@ void ServerNode::handleFollow(const nlohmann::json& j)
   goal.time_profile = static_cast<uint8_t>(j.value("time_profile", 0));
   goal.seam_constant_speed = j.value("seam_constant_speed", false);
   goal.weld_speed = j.value("weld_speed", 0.0);
+  goal.seam_dwell = j.value("seam_dwell", 0.0);
   // 0 auto / 1 forward / 2 reverse (mirrors the action constants).
   goal.direction = static_cast<uint8_t>(j.value("direction", 0));
   goal.corner_max_deviation = j.value("corner_max_deviation", 0.0);
@@ -634,8 +635,10 @@ void ServerNode::handleFollow(const nlohmann::json& j)
   goal.time_profile = static_cast<uint8_t>(j.value("time_profile", 0));
   goal.seam_constant_speed = j.value("seam_constant_speed", false);
   goal.weld_speed = j.value("weld_speed", 0.0);
+  goal.seam_dwell = j.value("seam_dwell", 0.0);
   goal.seam_constant_speed = j.value("seam_constant_speed", false);
   goal.weld_speed = j.value("weld_speed", 0.0);
+  goal.seam_dwell = j.value("seam_dwell", 0.0);
   if (j.contains("fixed_orientation") && j["fixed_orientation"].is_object())
   {
     goal.fixed_orientation.x = j["fixed_orientation"].value("x", 0.0);

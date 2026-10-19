@@ -999,6 +999,7 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
   params.jerk_limit = jerk_limit_;
   params.seam_constant_speed = goal->seam_constant_speed;
   params.weld_speed = goal->weld_speed;
+  params.seam_dwell = goal->seam_dwell;
   params.direction = goal->direction;
   params.corner_max_deviation = goal->corner_max_deviation;
   params.corner_threshold_deg = goal->corner_threshold_deg;
@@ -1174,6 +1175,7 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
     params.jerk_limit = jerk_limit_;
     params.seam_constant_speed = goal->seam_constant_speed;
     params.weld_speed = goal->weld_speed;
+    params.seam_dwell = goal->seam_dwell;
 
     // Per-seam feedback is mapped into the batch's 0..1 progress.
     auto seam_feedback = [&](float p, const std::string& phase) {
