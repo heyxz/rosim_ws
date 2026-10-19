@@ -5,6 +5,8 @@
 
 #include "rosim_server/server_node.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -170,6 +172,7 @@ ServerNode::ServerNode(const rclcpp::NodeOptions& options) : rclcpp::Node("rosim
   declare_parameter("ws_address", "0.0.0.0");
   declare_parameter("ws_port", 8765);
   declare_parameter("web_root", "");
+  model_dir_ = declare_parameter("model_dir", std::string(""));
 
   width_ = get_parameter("width").as_int();
   height_ = get_parameter("height").as_int();
@@ -285,6 +288,19 @@ void ServerNode::setupClients()
   follow_seams_client_ =
       rclcpp_action::create_client<FollowSeamsAction>(this, "/rosim_planning/follow_seams");
 
+  live_timer_ = create_wall_timer(std::chrono::milliseconds(200), [this]() {
+    if (live_dirty_.exchange(false))
+    {
+      std::size_t n = 0;
+      {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        n = tcp_path_.size();
+      }
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "live trace: %zu points", n);
+      broadcastTcpPathLocked();  // takes state_mutex_ itself
+    }
+  });
+
   joint_state_sub_ = create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::JointState::SharedPtr msg) {
@@ -383,7 +399,9 @@ void ServerNode::onWsMessage(const std::string& text, std::function<void(bool)> 
       set_workpiece(false);
     return;
   }
-  if (type == "import")
+  if (type == "list_dir")
+    handleListDir(j);
+  else if (type == "import")
     handleImport(j);
   else if (type == "select_edge")
     handleSelectEdge(j);
@@ -434,6 +452,74 @@ void ServerNode::onWsMessage(const std::string& text, std::function<void(bool)> 
 // ---------------------------------------------------------------------------
 // Control handlers
 // ---------------------------------------------------------------------------
+// Directory listing for the in-page model picker. Starts at model_dir_ (ROS
+// param), else the directory of the last imported file, else the process cwd;
+// only STEP/BREP/IGES files are offered, and nothing above the start directory
+// is browsable unless the caller passes an explicit path.
+void ServerNode::handleListDir(const nlohmann::json& j)
+{
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::path base;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (!model_dir_.empty())
+      base = model_dir_;
+    else if (!file_path_.empty())
+      base = fs::path(file_path_).parent_path();
+  }
+  if (base.empty())
+    base = fs::current_path();
+
+  fs::path dir = base;
+  if (j.contains("path") && j["path"].is_string() && !j["path"].get<std::string>().empty())
+    dir = j["path"].get<std::string>();
+  if (!fs::is_directory(dir, ec))
+    dir = base;
+  if (!fs::is_directory(dir, ec))
+    dir = fs::current_path();
+
+  std::vector<fs::directory_entry> dirs, files;
+  for (const auto& entry : fs::directory_iterator(dir, fs::directory_options::skip_permission_denied, ec))
+  {
+    std::error_code inner;
+    if (entry.is_directory(inner))
+    {
+      dirs.push_back(entry);
+      continue;
+    }
+    if (!entry.is_regular_file(inner))
+      continue;
+    std::string ext = entry.path().extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (ext == ".step" || ext == ".stp" || ext == ".brep" || ext == ".iges" || ext == ".igs")
+      files.push_back(entry);
+  }
+  const auto by_name = [](const fs::directory_entry& a, const fs::directory_entry& b) {
+    return a.path().filename().string() < b.path().filename().string();
+  };
+  std::sort(dirs.begin(), dirs.end(), by_name);
+  std::sort(files.begin(), files.end(), by_name);
+
+  nlohmann::json out;
+  out["type"] = "dir_listing";
+  out["path"] = dir.string();
+  out["parent"] = (dir != dir.root_path() && dir.has_parent_path()) ? dir.parent_path().string() : "";
+  out["root"] = base.string();
+  auto entries = nlohmann::json::array();
+  for (const auto& d : dirs)
+    entries.push_back({ { "name", d.path().filename().string() }, { "dir", true } });
+  for (const auto& f : files)
+  {
+    std::error_code size_ec;
+    entries.push_back({ { "name", f.path().filename().string() }, { "dir", false },
+                        { "size", static_cast<double>(fs::file_size(f, size_ec)) } });
+  }
+  out["entries"] = std::move(entries);
+  broadcastJson(std::move(out));
+}
+
 void ServerNode::handleImport(const nlohmann::json& j)
 {
   if (!j.contains("file_path") || !j["file_path"].is_string())
@@ -655,6 +741,7 @@ void ServerNode::handleFollow(const nlohmann::json& j)
   options.feedback_callback =
       [this](std::shared_ptr<FollowGoalHandle>,
              const std::shared_ptr<const FollowEdge::Feedback> feedback) {
+        // First motion phase: drop the previous trace and start the live one.
         nlohmann::json j;
         j["type"] = "follow_feedback";
         j["progress"] = feedback->progress;
@@ -663,6 +750,7 @@ void ServerNode::handleFollow(const nlohmann::json& j)
         broadcastJson(std::move(j));
       };
   options.result_callback = [this](const FollowGoalHandle::WrappedResult& result) {
+    follow_active_ = false;
     nlohmann::json j;
     j["type"] = "follow_result";
     j["success"] = result.result->success;
@@ -678,9 +766,26 @@ void ServerNode::handleFollow(const nlohmann::json& j)
       sj["points"] = result.result->tcp_samples;
       broadcastJson(std::move(sj));
     }
-    publishTcpPath(result.result->trajectory);
+    // Keep the live (measured) trace when it captured the run; fall back to the
+    // planned trajectory only when the live one is too sparse to be useful.
+    std::size_t live_points = 0;
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      live_points = tcp_path_.size();
+    }
+    live_dirty_ = false;
+    if (live_points < 30)
+      publishTcpPath(result.result->trajectory);
+    else
+      broadcastTcpPathFinalLocked();
   };
 
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    tcp_path_.clear();
+    follow_active_ = true;
+  }
+  broadcastTcpPathLocked();
   follow_client_->async_send_goal(goal, options);
 }
 
@@ -768,10 +873,27 @@ nlohmann::json ServerNode::tcpPathJsonLocked() const
 {
   nlohmann::json j;
   j["type"] = "tcp_path";
+  j["final"] = false;
   j["points"] = nlohmann::json::array();
   for (const auto& p : tcp_path_)
     j["points"].push_back({ p[0], p[1], p[2], p[3] });
   return j;
+}
+
+void ServerNode::broadcastTcpPathFinalLocked()
+{
+  std::vector<std::array<double, 4>> snapshot;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    snapshot = tcp_path_;
+  }
+  nlohmann::json j;
+  j["type"] = "tcp_path";
+  j["final"] = true;
+  j["points"] = nlohmann::json::array();
+  for (const auto& p : snapshot)
+    j["points"].push_back({ p[0], p[1], p[2], p[3] });
+  broadcastJson(std::move(j));
 }
 
 void ServerNode::broadcastTcpPathLocked()
@@ -1171,6 +1293,38 @@ void ServerNode::renderLoop()
     {
       std::lock_guard<std::mutex> lock(render_mutex_);
       applyPendingJointState();
+      if (follow_active_ && display_state_)
+      {
+        const Eigen::Vector3d p =
+            display_state_->getGlobalLinkTransform("tool_tip").translation();
+        const auto stamp = std::chrono::steady_clock::now();
+        double v = 0.0;
+        if (has_live_tcp_)
+        {
+          const double dt = std::chrono::duration<double>(stamp - live_stamp_).count();
+          if (dt > 1e-3)
+            v = (p - live_tcp_).norm() / dt;
+        }
+        live_tcp_ = p;
+        live_stamp_ = stamp;
+        has_live_tcp_ = true;
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                             "live tcp (%.3f %.3f %.3f) v=%.1f mm/s", p.x(), p.y(), p.z(),
+                             v * 1000.0);
+        {
+          std::lock_guard<std::mutex> state_lock(state_mutex_);
+          const bool far_enough =
+              tcp_path_.empty() ||
+              (p - Eigen::Vector3d(tcp_path_.back()[0], tcp_path_.back()[1],
+                                   tcp_path_.back()[2]))
+                      .norm() > 1e-3;
+          if (far_enough)
+          {
+            tcp_path_.push_back({ p.x(), p.y(), p.z(), v });
+            live_dirty_ = true;
+          }
+        }
+      }
       if (want_frames)
         jpeg = renderer_->captureJpeg(quality_);
       if (want_scene)
@@ -1629,6 +1783,15 @@ void ServerNode::handleFollowSeams(const nlohmann::json& j)
   goal.tool_offset = j.value("tool_offset", 0.0);
   goal.approach_distance = j.value("approach_distance", 0.08);
   goal.max_waypoint_spacing = j.value("max_waypoint_spacing", 0.005);
+  // Batch path must forward the same tuning knobs as the single-edge path;
+  // dropping them silently pinned every batch run to the defaults.
+  goal.corner_max_deviation = j.value("corner_max_deviation", 0.0);
+  goal.corner_threshold_deg = j.value("corner_threshold_deg", 0.0);
+  goal.corner_orient_window = j.value("corner_orient_window", 0.0);
+  goal.time_profile = static_cast<uint8_t>(j.value("time_profile", 0));
+  goal.seam_constant_speed = j.value("seam_constant_speed", false);
+  goal.weld_speed = j.value("weld_speed", 0.0);
+  goal.seam_dwell = j.value("seam_dwell", 0.0);
 
   const uint8_t direction = static_cast<uint8_t>(j.value("direction", 0));
   std::vector<uint32_t> ids;
@@ -1691,9 +1854,24 @@ void ServerNode::handleFollowSeams(const nlohmann::json& j)
     o["failed_messages"] = r.failed_messages;
     broadcastJson(std::move(o));
     broadcastSeamsLocked();  // refreshed last_result marks
-    publishTcpPath(r.trajectory);
+    std::size_t live_points = 0;
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      live_points = tcp_path_.size();
+    }
+    live_dirty_ = false;
+    if (live_points < 30)
+      publishTcpPath(r.trajectory);
+    else
+      broadcastTcpPathFinalLocked();
   };
 
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    tcp_path_.clear();
+    follow_active_ = true;
+  }
+  broadcastTcpPathLocked();
   follow_seams_client_->async_send_goal(goal, options);
   broadcastJson(statusJson(true, "running " + std::to_string(ids.size()) + " seams"));
 }

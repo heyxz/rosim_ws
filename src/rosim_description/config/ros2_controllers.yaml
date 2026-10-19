@@ -23,6 +23,7 @@ arm_controller:
     state_interfaces:
       - position
       - velocity
+    interpolation_method: splines
     state_publish_rate: 100.0
     action_monitor_rate: 20.0
     allow_partial_joints_goal: false

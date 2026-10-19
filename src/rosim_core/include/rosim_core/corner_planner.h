@@ -25,6 +25,12 @@ struct CornerPolicy
   double max_deviation = 5e-4;
   /// If the available segment length forces the radius below this, the corner
   /// cannot be blended and is handled by an in-place wrist rotation instead.
+  // A fillet is preferred over an in-place pivot: the weld torch keeps moving
+  // through the corner (slowing down is handled by the seam speed profile), and
+  // the cartesian solver now uses an ABSOLUTE per-step jump limit, so even the
+  // tight 1.2 mm fillet a 0.5 mm deviation budget yields for a 90 deg corner is
+  // traversable. Only when the neighbouring segments leave no room for any arc
+  // does the corner degrade to a pivot.
   double min_radius = 5e-5;
   /// Allow the in-place-rotation fallback. When false such a corner is simply
   /// left sharp (and will likely truncate the Cartesian run).

@@ -1106,6 +1106,7 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
   std::vector<uint8_t> failed_idx;
   std::vector<std::string> failed_msg;
   std::size_t executed = 0;
+  const bool single_seam = goal->seams.size() == 1;
 
   auto finish = [&](bool success, const std::string& msg) {
     result->success = success;
@@ -1210,14 +1211,9 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
       continue;
     }
 
-    // Concatenate: the first waypoint of this segment equals the last one of
-    // the previous segment (both are `current`), so drop it.
-    for (std::size_t k = 0; k < outcome.trajectory->size(); ++k)
-    {
-      if (k == 0 && combined.size() > 0)
-        continue;
-      combined.addSuffixWayPoint(outcome.trajectory->getWayPoint(k), 0.0);
-    }
+    // A single seam is used verbatim: it already carries the weld profile
+    // (constant seam speed, corner slowdowns, strike/extinguish ramps).
+    combined = *outcome.trajectory;
     current = outcome.trajectory->getLastWayPoint();
     scene_->setCurrentState(current);
     ++executed;
@@ -1228,22 +1224,38 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
   if (cancel_.load())
     return finish(false, "canceled before execution");
 
-  // One time-parameterization pass over the whole batch so the robot never
-  // slows to a stop at a seam boundary.
-  try
+  // Batch re-timing. A single seam is used verbatim: the edge follower already
+  // timed it (TOTG or the requested double-S pass) and applied the weld profile
+  // (constant seam speed, corner slowdowns, strike/extinguish ramps). Re-timing
+  // it here is exactly what used to flatten that profile and make "double-S"
+  // look non-uniform on screen. Multi-seam batches still get one global pass so
+  // the robot does not stop at every seam boundary.
+  if (single_seam)
   {
-    trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
-    if (!totg.computeTimeStamps(combined, speed_scale_, speed_scale_))
-      RCLCPP_WARN(LOGGER, "batch TOTG failed; keeping per-seam timings");
-    if (goal->time_profile == 1)
-      applyScurve(combined);
+    RCLCPP_INFO(LOGGER, "single seam: keeping the planned weld profile");
   }
-  catch (const std::exception& e)
+  else
   {
-    RCLCPP_WARN(LOGGER, "batch TOTG threw: %s", e.what());
+    try
+    {
+      trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
+      if (!totg.computeTimeStamps(combined, speed_scale_, speed_scale_))
+        RCLCPP_WARN(LOGGER, "batch TOTG failed; keeping per-seam timings");
+      if (goal->time_profile == 1)
+        applyScurve(combined);
+    }
+    catch (const std::exception& e)
+    {
+      RCLCPP_WARN(LOGGER, "batch TOTG threw: %s", e.what());
+    }
   }
 
+  RCLCPP_INFO(LOGGER, "batch: publishing %zu waypoints, duration %.1fs", combined.size(),
+              combined.size() > 1
+                  ? combined.getWayPointDurationFromStart(combined.size() - 1)
+                  : 0.0);
   publishTrajectory(combined, true);
+  RCLCPP_INFO(LOGGER, "batch: published, entering monitor");
   moveit_msgs::msg::RobotTrajectory rt_msg;
   combined.getRobotTrajectoryMsg(rt_msg);
   // The server draws the TCP path from this trajectory; without it the batch
@@ -1307,6 +1319,12 @@ bool PlanningNode::monitorTrajectory(const trajectory_msgs::msg::JointTrajectory
 
     if (progress)
       progress(static_cast<float>(std::min(1.0, elapsed / std::max(total_time, 0.1))));
+    static auto last_dbg = std::chrono::steady_clock::now();
+    if (std::chrono::steady_clock::now() - last_dbg > std::chrono::seconds(5))
+    {
+      last_dbg = std::chrono::steady_clock::now();
+      RCLCPP_INFO(LOGGER, "monitor: elapsed %.1fs / %.1fs", elapsed, total_time);
+    }
 
     if (elapsed > timeout)
     {

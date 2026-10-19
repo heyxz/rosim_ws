@@ -15,3 +15,6 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
+
+# 桥接自动维护的跨通道共享记忆
+AGENTS.local.md

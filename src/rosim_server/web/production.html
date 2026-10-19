@@ -359,6 +359,11 @@ function clearWorkpiece() {
   workpieceBounds = null;
 }
 
+// 焊接执行期间隐藏工件上的边标注线，避免遮住 TCP 轨迹/焊缝。
+function setEdgeOverlayVisible(visible) {
+  for (const em of edgeMeshes) em.mesh.visible = visible;
+}
+
 function onWorkpiece(j) {
   clearWorkpiece();
   workpieceGroup = new THREE.Group();
@@ -582,6 +587,7 @@ function onJson(j) {
       break;
     }
     case "follow_feedback": {
+      if (!welding) setEdgeOverlayVisible(false);
       welding = true;
       $("progress_fill").style.width = (j.progress * 100) + "%";
       setPhase("run", "运行中 · " + j.phase + "  " + (j.progress * 100).toFixed(0) + "%");
@@ -591,6 +597,7 @@ function onJson(j) {
     }
     case "follow_result": {
       welding = false;
+      setEdgeOverlayVisible(true);
       $("progress_fill").style.width = j.success ? "100%" : "0";
       if (j.success) {
         setPhase("done", "焊接完成");

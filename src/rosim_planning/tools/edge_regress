@@ -94,6 +94,11 @@ class Regression(Node):
         goal = FollowSeams.Goal()
         goal.model_id = model_id
         goal.orientation_mode = self.args.orientation_mode
+        goal.seam_constant_speed = self.args.seam_uniform
+        goal.weld_speed = self.args.weld_speed / 1000.0
+        goal.time_profile = self.args.time_profile
+        goal.corner_max_deviation = self.args.corner_dev / 1000.0
+        goal.corner_orient_window = self.args.corner_window / 1000.0
         goal.tangent_tilt = self.args.tangent_tilt
         goal.tool_offset = self.args.tool_offset
         goal.approach_distance = self.args.approach
@@ -122,6 +127,16 @@ class Regression(Node):
             return {"ok": False, "secs": secs, "executed": 0, "failed": len(specs),
                     "failed_indices": list(range(len(specs))), "failed_messages": ["timeout"]}
         r = res_fut.result().result
+        if self.args.dump_traj and len(r.trajectory.points) > 0:
+            pts = [[round(v, 6) for v in q.positions] for q in r.trajectory.points]
+            ts = [q.time_from_start.sec + q.time_from_start.nanosec * 1e-9
+                  for q in r.trajectory.points]
+            path = os.path.expanduser(self.args.dump_traj)
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "w") as f:
+                json.dump({"joint_names": list(r.trajectory.joint_names),
+                           "times": ts, "points": pts}, f)
+            log(f"轨迹已导出: {path} ({len(pts)} 点, {ts[-1]:.1f}s)")
         return {"ok": bool(r.success), "secs": secs, "executed": int(r.executed),
                 "failed": int(r.failed), "failed_indices": list(r.failed_indices),
                 "failed_messages": list(r.failed_messages), "message": r.message}
@@ -131,6 +146,11 @@ class Regression(Node):
         goal.model_id = model_id
         goal.edge_index = edge_index
         goal.orientation_mode = self.args.orientation_mode
+        goal.seam_constant_speed = self.args.seam_uniform
+        goal.weld_speed = self.args.weld_speed / 1000.0
+        goal.time_profile = self.args.time_profile
+        goal.corner_max_deviation = self.args.corner_dev / 1000.0
+        goal.corner_orient_window = self.args.corner_window / 1000.0
         goal.direction = self.args.direction
         goal.tangent_tilt = self.args.tangent_tilt
         goal.tool_offset = self.args.tool_offset
@@ -220,6 +240,8 @@ def main():
     ap.add_argument("--edges", default="all", help="'all' 或逗号分隔的边号")
     ap.add_argument("--seams", default=None,
                     help="焊缝批量模式：分号分隔多条缝，每条缝用逗号分隔边号，例如 '17;22;1,17'")
+    ap.add_argument("--dump-traj", dest="dump_traj", default=None,
+                    help="把执行用的关节轨迹导出为 JSON，用于分析是否来回")
     ap.add_argument("--out", default=None, help="结果 JSON（默认 .scratch/regress/run-<时间>.json）")
     ap.add_argument("--compare", default=None, help="与基线 JSON 对比")
     ap.add_argument("--home-between", dest="home_between", action="store_true", default=True)
@@ -231,6 +253,12 @@ def main():
     ap.add_argument("--tool-offset", type=float, default=0.0)
     ap.add_argument("--approach", type=float, default=0.08)
     ap.add_argument("--spacing", type=float, default=0.005)
+    ap.add_argument("--seam-uniform", dest="seam_uniform", action="store_true", default=False,
+                    help="焊缝段匀速（seam_constant_speed）")
+    ap.add_argument("--weld-speed", type=float, default=0.0, help="焊速 mm/s，0 = 用中位速度")
+    ap.add_argument("--time-profile", type=int, default=0, help="0=TOTG, 1=双S(Ruckig)")
+    ap.add_argument("--corner-dev", type=float, default=0.0, help="拐角偏离 mm")
+    ap.add_argument("--corner-window", type=float, default=0.0, help="拐角姿态窗口 mm")
     ap.add_argument("--timeout-edge", type=float, default=300.0)
     ap.add_argument("--timeout-home", type=float, default=180.0)
     ap.add_argument("--timeout-init", type=float, default=30.0)

@@ -6,6 +6,7 @@
 
 #include "rosim_planning/edge_follower.h"
 
+#include <Eigen/Geometry>
 #include <moveit/trajectory_processing/ruckig_traj_smoothing.h>
 
 #include <unordered_map>
@@ -486,7 +487,7 @@ double EdgeFollower::runCartesian(const moveit::core::RobotState& start,
       &work, group, out_states, model_->getLinkModel(tip_link_), waypoints,
       /*global_reference_frame=*/true,
       moveit::core::MaxEEFStep(config_.eef_step_translation, config_.eef_step_rotation),
-      moveit::core::JumpThreshold(config_.jump_threshold_factor), validity);
+      moveit::core::JumpThreshold(config_.jump_threshold_revolute, config_.jump_threshold_prismatic), validity);
 
   if (fraction < 1.0 && !out_states.empty())
   {
@@ -532,8 +533,13 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     return 0.0;
 
   std::vector<Eigen::Vector3d> tcp(rt.size());
+  std::vector<Eigen::Matrix3d> rot(rt.size());
   for (std::size_t i = 0; i < rt.size(); ++i)
-    tcp[i] = rt.getWayPoint(i).getGlobalLinkTransform(tip_link_).translation();
+  {
+    const Eigen::Isometry3d tip = rt.getWayPoint(i).getGlobalLinkTransform(tip_link_);
+    tcp[i] = tip.translation();
+    rot[i] = tip.linear();
+  }
 
   auto frameDist = [&](const Eigen::Vector3d& p) {
     double best = 1e9;
@@ -568,9 +574,27 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
   if (i0 < 0 || i1 - i0 < 3)
     return 0.0;
 
+  // Generalized path coordinate: translation, plus an equivalent arc length for
+  // orientation-only motion. A 90 deg corner pivot holds the TCP still while the
+  // wrist turns; with pure translation length the seam timer would refuse to
+  // advance there, every pivot step would look like infinite joint velocity, and
+  // the constant-speed profile would be dropped entirely (seam then runs on the
+  // TOTG profile, i.e. visibly non-uniform). Scaling the turn by a small lever
+  // arm keeps translational speed semantics unchanged on normal seam segments.
+  constexpr double kPivotLever = 0.01;  // m of equivalent travel per radian
   std::vector<double> len(tcp.size(), 0.0);
   for (std::size_t i = 1; i < tcp.size(); ++i)
-    len[i] = len[i - 1] + (tcp[i] - tcp[i - 1]).norm();
+  {
+    const double ds = (tcp[i] - tcp[i - 1]).norm();
+    double dtheta = 0.0;
+    if (i < rot.size())
+    {
+      const Eigen::Quaterniond qa(rot[i - 1]);
+      const Eigen::Quaterniond qb(rot[i]);
+      dtheta = qa.angularDistance(qb);
+    }
+    len[i] = len[i - 1] + std::max(ds, kPivotLever * dtheta);
+  }
   const double span = len[i1] - len[i0];
   if (span < 1e-4)
     return 0.0;
@@ -591,36 +615,87 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
   if (v <= 1e-6)
     return 0.0;
 
-  // Ramp at the two seam ends: the TCP must be standing still exactly at the
-  // strike/extinguish points, so the acceleration happens inside the seam over
-  // a short, configurable distance.
-  const double ramp = std::max(1e-3, std::min(0.02, 0.25 * span));
+  // Ramp length: budget by TIME (0.5 s per end), capped by 20 mm and a quarter
+  // of the seam. The strike/extinguish points stay at rest either way; a fixed
+  // 20 mm ramp would mean 8 s of creeping at a 5 mm/s weld speed.
+  const double ramp = std::max(1e-3, std::min({ 0.02, 0.25 * span, std::max(5e-4, 0.5 * v) }));
   const double a_ramp = v * v / (2.0 * ramp);
-  double t_ramp = v / a_ramp;
-  double cruise = span - 2.0 * ramp;
-  if (cruise < 0.0)
-  {
-    // Seam shorter than the two ramps: triangular profile, lower peak speed.
-    cruise = 0.0;
-    const double v_peak = std::sqrt(a_ramp * span);  // keep the same accel
-    v = std::min(v, v_peak);
-    t_ramp = v / a_ramp;
-  }
-  const double seam_time = 2.0 * t_ramp + cruise / v;
 
-  auto seamTimeAt = [&](double s) {
-    if (s <= 0.0)
-      return 0.0;
-    if (s <= ramp)
-      return std::sqrt(2.0 * s / a_ramp);
-    if (s >= span - ramp && ramp > 0.0)
-      return seam_time - std::sqrt(2.0 * std::max(0.0, span - s) / a_ramp);
-    return t_ramp + (s - ramp) / v;
+  // Corner speed shaping: a fillet at a seam corner is traversed slower than the
+  // straight runs. Build a per-point factor that dips around every detected turn
+  // and recovers over +/- kCornerWindow, so the weld decelerates into the corner
+  // and accelerates out of it instead of stopping.
+  constexpr double kCornerRatio = 0.5;    // corner speed = 50 % of the weld speed
+  constexpr double kCornerWindow = 0.02;  // m, influence radius around a turn
+  std::vector<double> kfac(rt.size(), 1.0);
+  for (std::size_t i = 1; i + 1 < rt.size(); ++i)
+  {
+    const Eigen::Vector3d a = tcp[i] - tcp[i - 1];
+    const Eigen::Vector3d b = tcp[i + 1] - tcp[i];
+    if (a.norm() < 1e-9 || b.norm() < 1e-9)
+      continue;
+    const double dot = std::clamp(a.normalized().dot(b.normalized()), -1.0, 1.0);
+    if (std::acos(dot) < 0.14)  // < ~8 deg is not a corner
+      continue;
+    for (std::size_t j = 0; j < rt.size(); ++j)
+    {
+      const double d = std::abs(len[j] - len[i]);
+      if (d >= kCornerWindow)
+        continue;
+      const double f = kCornerRatio + (1.0 - kCornerRatio) * (d / kCornerWindow);
+      kfac[j] = std::min(kfac[j], f);
+    }
+  }
+
+  int corner_pts = 0;
+  double min_factor = 1.0;
+  for (long i = i0; i <= i1; ++i)
+    if (kfac[static_cast<std::size_t>(i)] < 0.999)
+    {
+      ++corner_pts;
+      min_factor = std::min(min_factor, kfac[static_cast<std::size_t>(i)]);
+    }
+  if (corner_pts > 0)
+    RCLCPP_INFO(LOGGER, "corner slowdown: %d seam points, min speed factor %.2f", corner_pts,
+                min_factor);
+
+  // Seam durations for a candidate peak speed: rest-to-rest ramps at both ends,
+  // corner-shaped cruise in between.
+  auto seamDurations = [&](double peak) {
+    std::vector<double> out(rt.size(), 0.0);
+    const double r = std::max(1e-3, std::min({ 0.02, 0.25 * span, std::max(5e-4, 0.5 * peak) }));
+    // Rest-to-rest ramps are integrated analytically: v(s) = sqrt(2 a s), so a
+    // numerical ds / v becomes singular at the last point (v -> 0) and used to
+    // stretch that one segment to minutes. t(s) = sqrt(2/a) sqrt(s) instead.
+    const double a = peak * peak / (2.0 * r);
+    const double c = std::sqrt(2.0 / std::max(1e-9, a));
+    for (long i = i0 + 1; i <= i1; ++i)
+    {
+      const double s_prev = len[i - 1] - len[i0];
+      const double s_cur = len[i] - len[i0];
+      double dt;
+      if (s_cur <= r)
+        dt = c * (std::sqrt(std::max(0.0, s_cur)) - std::sqrt(std::max(0.0, s_prev)));
+      else if (s_prev >= span - r)
+        dt = c * (std::sqrt(std::max(0.0, span - s_prev)) -
+                  std::sqrt(std::max(0.0, span - s_cur)));
+      else
+      {
+        const double ds = std::max(0.0, s_cur - s_prev);
+        const double vv = std::max(1e-6, peak * kfac[static_cast<std::size_t>(i)]);
+        dt = ds / vv;
+      }
+      out[static_cast<std::size_t>(i)] = out[static_cast<std::size_t>(i - 1)] + std::max(0.0, dt);
+    }
+    return out;
   };
 
   // Approach / depart: rest-to-rest trapezoids at a conservative speed.
-  const double v_move = std::max(0.02, std::min(0.3, 2.0 * v));
-  const double a_move = std::max(0.2, 4.0 * a_ramp);
+  // Approach / depart speed. They are rest-to-rest (the seam starts and ends at
+  // rest), but they must not crawl: 20 mm/s made a 1.5 m approach take 77 s.
+  // Scale with the weld speed and cap well below the robot's limits.
+  const double v_move = std::max(0.05, std::min(0.4, 20.0 * v));
+  const double a_move = std::max(0.3, 8.0 * a_ramp);
   auto trapTime = [&](double s, double L) {
     if (L < 1e-6)
       return 0.0;
@@ -654,21 +729,10 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     q[i] = vq;
   }
   auto overload = [&](double speed) {
-    const double a_r = speed * speed / (2.0 * ramp);
-    const double tr = speed / std::max(1e-9, a_r);
+    const std::vector<double> durs = seamDurations(speed);
     for (long i = i0 + 1; i <= i1; ++i)
     {
-      const double ds = len[i] - len[i - 1];
-      double dt;
-      if (len[i] - len[i0] <= ramp)
-        dt = std::sqrt(2.0 * std::max(1e-9, len[i] - len[i0]) / a_r) -
-             std::sqrt(2.0 * std::max(0.0, len[i - 1] - len[i0]) / a_r);
-      else if (len[i] - len[i0] >= span - ramp)
-        dt = std::sqrt(2.0 * std::max(0.0, span - (len[i - 1] - len[i0])) / a_r) -
-             std::sqrt(2.0 * std::max(0.0, span - (len[i] - len[i0])) / a_r);
-      else
-        dt = ds / speed;
-      (void)tr;
+      const double dt = durs[static_cast<std::size_t>(i)] - durs[static_cast<std::size_t>(i - 1)];
       if (dt <= 1e-9)
         continue;
       for (std::size_t j = 0; j < vars.size(); ++j)
@@ -705,21 +769,40 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     return ts;
   };
 
+  // The seam starts and ends at rest, so the approach and the departure must too.
+  // Timing them with an independent TOTG pass left them arriving at ~0.13 rad/s
+  // while the seam began at 0: a velocity step at every seam boundary, felt as a
+  // jolt. trapTime() is rest-to-rest by construction, so use it for both sides.
   std::vector<double> t(rt.size(), 0.0);
   const double L_pre = len[i0];
-  const auto pre = totgTimes(0, static_cast<std::size_t>(i0));
   for (long i = 0; i <= i0; ++i)
-    t[i] = pre.size() == static_cast<std::size_t>(i0) + 1 ? pre[static_cast<std::size_t>(i)]
-                                                          : trapTime(len[i], L_pre);
+    t[i] = trapTime(len[i], L_pre);
+  const std::vector<double> seam_dur = seamDurations(v);
   for (long i = i0 + 1; i <= i1; ++i)
-    t[i] = t[i0] + seamTimeAt(len[i] - len[i0]);
+    t[i] = t[i0] + seam_dur[static_cast<std::size_t>(i)];
+
+  // Report the speed the seam will actually run at, so "is it constant" is a
+  // number in the log instead of a guess from the colour ramp.
+  {
+    std::vector<double> sp;
+    for (long i = i0 + 1; i <= i1; ++i)
+    {
+      const double dt = t[i] - t[i - 1];
+      if (dt > 1e-6)
+        sp.push_back((tcp[i] - tcp[i - 1]).norm() / dt * 1000.0);
+    }
+    if (!sp.empty())
+    {
+      std::sort(sp.begin(), sp.end());
+      const double med = sp[sp.size() / 2];
+      RCLCPP_INFO(LOGGER, "seam speed profile: min %.1f / median %.1f / max %.1f mm/s (%zu segs)",
+                  sp.front(), med, sp.back(), sp.size());
+    }
+  }
   const double t_end_seam = t[i1];
   const double L_post = len.back() - len[i1];
-  const auto post = totgTimes(static_cast<std::size_t>(i1), rt.size() - 1);
   for (std::size_t i = static_cast<std::size_t>(i1) + 1; i < rt.size(); ++i)
-    t[i] = t_end_seam + (post.size() == rt.size() - static_cast<std::size_t>(i1)
-                             ? post[i - static_cast<std::size_t>(i1)]
-                             : trapTime(len[i] - len[i1], L_post));
+    t[i] = t_end_seam + trapTime(len[i] - len[i1], L_post);
 
   rt.setWayPointDurationFromPrevious(0, 0.0);
   for (std::size_t i = 1; i < rt.size(); ++i)
@@ -728,6 +811,8 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     rt.setWayPointDurationFromPrevious(i, dt > 1e-6 ? dt : 1e-6);
   }
 
+  RCLCPP_INFO(LOGGER, "profile split: pre %.1fs, seam %.1fs, post %.1fs, total %.1fs (i0=%ld i1=%ld)",
+              t[i0], t_end_seam - t[i0], t.back() - t_end_seam, t.back(), i0, i1);
   RCLCPP_INFO(LOGGER, "weld profile: seam span idx [%ld, %ld] of %zu, span %.3f m, v=%.1f mm/s, dwell=%.2fs",
               i0, i1, rt.size(), span, v * 1000.0, dwell);
   // Arc strike / extinguish: hold the torch still at both seam ends. A zero
@@ -1403,6 +1488,44 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
                 scene->distanceToCollisionUnpadded(*cart_states.back()) * 1000.0);
   }
 
+  // ---------------- joint-space continuity ---------------------------------
+  // IK can return the same pose with an equivalent angle in another turn (for
+  // example +3.1 rad vs -3.1 rad on j6). Interpolating straight between two such
+  // waypoints swings the wrist all the way round, which reads as a snap or a
+  // back-and-forth hitch mid-weld. Shift each waypoint by 2*pi*k whenever that
+  // shortens the move and keeps the joint inside its limits.
+  {
+    std::size_t unwrapped = 0;
+    std::vector<double> q_prev, q_cur;
+    const auto& vnames = group->getVariableNames();
+    for (std::size_t i = 0; i < cart_states.size(); ++i)
+    {
+      cart_states[i]->copyJointGroupPositions(group, q_cur);
+      if (i > 0 && q_prev.size() == q_cur.size())
+      {
+        for (std::size_t j = 0; j < q_cur.size() && j < vnames.size(); ++j)
+        {
+          const double dq = q_cur[j] - q_prev[j];
+          if (std::fabs(dq) <= M_PI)
+            continue;
+          const double shift = -2.0 * M_PI * std::round(dq / (2.0 * M_PI));
+          const auto& b = model_->getVariableBounds(vnames[j]);
+          const double cand = q_cur[j] + shift;
+          if (b.position_bounded_ && (cand < b.min_position_ || cand > b.max_position_))
+            continue;
+          cart_states[i]->setVariablePosition(vnames[j], cand);
+          q_cur[j] = cand;
+          ++unwrapped;
+        }
+        cart_states[i]->update();
+      }
+      q_prev = q_cur;
+    }
+    if (unwrapped > 0)
+      RCLCPP_INFO(LOGGER, "joint continuity: unwrapped %zu waypoint joints (avoided long-way rotations)",
+                  unwrapped);
+  }
+
   // ---------------- merge + time parameterization -------------------------
   auto merged = std::make_unique<robot_trajectory::RobotTrajectory>(model_, group);
   for (size_t i = 0; i < preres.trajectory->size(); ++i)
@@ -1416,6 +1539,29 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   }
   if (merged->size() < 2)
     return report_error(ErrorCode::ERROR_CARTESIAN, "merged trajectory degenerate");
+
+  // Drop consecutive waypoints whose joint values are identical. A zero-length
+  // segment forces the controller's spline to stall on that knot, which shows up
+  // as a visible hitch mid-move (the "back and forth" stutter).
+  {
+    auto clean = std::make_unique<robot_trajectory::RobotTrajectory>(model_, group);
+    std::size_t dropped = 0;
+    for (std::size_t i = 0; i < merged->size(); ++i)
+    {
+      if (clean->size() > 0 &&
+          sameGroupState(*merged->getWayPointPtr(i), clean->getLastWayPoint(), group))
+      {
+        ++dropped;
+        continue;
+      }
+      clean->addSuffixWayPoint(merged->getWayPointPtr(i),
+                               merged->getWayPointDurationFromPrevious(i));
+    }
+    if (dropped > 0)
+      RCLCPP_INFO(LOGGER, "merged: dropped %zu duplicate waypoints of %zu", dropped,
+                  merged->size());
+    *merged = std::move(*clean);
+  }
 
   trajectory_processing::TimeOptimalTrajectoryGeneration totg(0.002, 0.01, 0.001);
   if (!totg.computeTimeStamps(*merged, params.velocity_scaling, params.acceleration_scaling))
@@ -1443,7 +1589,42 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
                              : (prismatic ? params.jerk_limit * 0.05 : params.jerk_limit);
       }
     }
-    if (!trajectory_processing::RuckigSmoothing::applySmoothing(*merged, vlim, alim, jlim))
+    bool smoothed =
+        trajectory_processing::RuckigSmoothing::applySmoothing(*merged, vlim, alim, jlim);
+    if (!smoothed)
+    {
+      // Dense 4 mm cartesian sampling leaves ~15 ms segments; the jerk-limited
+      // pass then returns "Working" even after stretching the duration 10x and
+      // gives up. Retry on a decimated copy - the controller interpolates
+      // between waypoints, so a ~30 ms grid loses nothing on the seam.
+      const std::size_t n = merged->size();
+      const double total = n > 1 ? merged->getWayPointDurationFromStart(n - 1) : 0.0;
+      const double avg_dt = total > 1e-6 ? total / static_cast<double>(n - 1) : 0.0;
+      const std::size_t stride =
+          avg_dt > 1e-6 ? std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(0.03 / avg_dt)))
+                        : 1;
+      auto coarse = std::make_unique<robot_trajectory::RobotTrajectory>(model_, group);
+      double carry = 0.0;
+      for (std::size_t i = 0; i < n; ++i)
+      {
+        carry += merged->getWayPointDurationFromPrevious(i);
+        const bool keep = (stride == 1) || (i + 1 == n) || ((i % stride) == stride - 1);
+        if (!keep)
+          continue;
+        coarse->addSuffixWayPoint(merged->getWayPointPtr(i), carry);
+        carry = 0.0;
+      }
+      if (coarse->size() >= 2 && trajectory_processing::RuckigSmoothing::applySmoothing(*coarse, vlim, alim, jlim))
+      {
+        RCLCPP_INFO(LOGGER, "Ruckig smoothing succeeded on a decimated trajectory (%zu -> %zu pts)",
+                    n, coarse->size());
+        *merged = std::move(*coarse);
+        smoothed = true;
+      }
+    }
+    if (smoothed)
+      RCLCPP_INFO(LOGGER, "Ruckig smoothing applied (%zu waypoints)", merged->size());
+    else
       RCLCPP_WARN(LOGGER, "Ruckig smoothing failed; keeping the TOTG profile");
   }
 
@@ -1456,6 +1637,101 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
       RCLCPP_INFO(LOGGER, "seam constant speed: %.1f mm/s", v * 1000.0);
     else
       RCLCPP_WARN(LOGGER, "seam constant speed could not be applied; keeping the profile");
+  }
+
+  // Regularise the time grid. The joint trajectory controller samples at 100 Hz,
+  // so a waypoint gap below one control period cannot be followed: the spline
+  // spikes on that knot and the arm visibly jerks (the "back and forth" report).
+  // The exported trajectories showed 46 gaps under 10 ms, the shortest 4.5 ms.
+  // Stretching those gaps costs a fraction of a second and makes the motion
+  // executable as planned.
+  {
+    constexpr double kMinSegment = 0.02;  // s, 2x the controller period
+    std::size_t clamped = 0;
+    for (std::size_t i = 1; i < merged->size(); ++i)
+    {
+      if (merged->getWayPointDurationFromPrevious(i) < kMinSegment)
+      {
+        merged->setWayPointDurationFromPrevious(i, kMinSegment);
+        ++clamped;
+      }
+    }
+    if (clamped > 0)
+      RCLCPP_INFO(LOGGER, "timing: clamped %zu segments shorter than 20 ms (would not be executable)",
+                  clamped);
+  }
+
+  // Resample onto a uniform 50 Hz grid. The controller interpolates linearly
+  // between waypoints (interpolation_method: none, chosen because cubic splines
+  // overshot and made the arm oscillate). With an irregular grid (0.02 s next to
+  // 0.4 s) the piecewise-constant joint velocity shows up as a staircase, i.e.
+  // the "choppy" motion. A uniform grid keeps the same path and timing but makes
+  // the velocity steps small and frequent, which reads as smooth.
+  {
+    constexpr double kPeriod = 0.05;
+    const double total =
+        merged->size() > 1 ? merged->getWayPointDurationFromStart(merged->size() - 1) : 0.0;
+    if (total > 2.0 * kPeriod && merged->size() > 3)
+    {
+      auto resampled = std::make_unique<robot_trajectory::RobotTrajectory>(model_, group);
+      const auto& vnames = group->getVariableNames();
+      std::size_t k = 0;
+      std::vector<double> qa(vnames.size()), qb(vnames.size());
+      for (double t = 0.0; t <= total + 1e-9; t += kPeriod)
+      {
+        while (k + 2 < merged->size() && merged->getWayPointDurationFromStart(k + 1) < t)
+          ++k;
+        const double t0 = merged->getWayPointDurationFromStart(k);
+        const double t1 = merged->getWayPointDurationFromStart(k + 1);
+        const double alpha = t1 > t0 + 1e-9 ? std::min(1.0, std::max(0.0, (t - t0) / (t1 - t0)))
+                                            : 1.0;
+        moveit::core::RobotState st = *merged->getWayPointPtr(k);
+        for (std::size_t j = 0; j < vnames.size(); ++j)
+        {
+          const double a = merged->getWayPoint(k).getVariablePosition(vnames[j]);
+          const double b = merged->getWayPoint(std::min(k + 1, merged->size() - 1))
+                               .getVariablePosition(vnames[j]);
+          st.setVariablePosition(vnames[j], a + alpha * (b - a));
+        }
+        st.update();
+        resampled->addSuffixWayPoint(st, resampled->size() == 0 ? 0.0 : kPeriod);
+      }
+      RCLCPP_INFO(LOGGER, "timing: resampled %zu -> %zu waypoints on a uniform 50 Hz grid",
+                  merged->size(), resampled->size());
+      *merged = std::move(*resampled);
+    }
+  }
+
+  // Fill in joint velocities and accelerations. The controller's spline
+  // interpolation consumes them: with an empty velocity array it assumes zero
+  // velocity at every waypoint, so every segment starts and ends at rest and the
+  // motion becomes a series of jerks (measured: 375 reversals on q6). Central
+  // differences on the uniform grid give the spline a consistent tangent.
+  {
+    const auto& vnames = group->getVariableNames();
+    const std::size_t n = merged->size();
+    if (n >= 3)
+    {
+      auto pos = [&](std::size_t i, std::size_t j) {
+        return merged->getWayPoint(i).getVariablePosition(vnames[j]);
+      };
+      for (std::size_t i = 0; i < n; ++i)
+      {
+        auto& wp = *merged->getWayPointPtr(i);
+        const std::size_t i0 = i > 0 ? i - 1 : 0;
+        const std::size_t i1 = i + 1 < n ? i + 1 : n - 1;
+        const double t0 = merged->getWayPointDurationFromStart(i0);
+        const double t1 = merged->getWayPointDurationFromStart(i1);
+        const double span = t1 - t0;
+        for (std::size_t j = 0; j < vnames.size(); ++j)
+        {
+          const double v =
+              (i == 0 || i + 1 == n || span < 1e-6) ? 0.0 : (pos(i1, j) - pos(i0, j)) / span;
+          wp.setVariableVelocity(vnames[j], v);
+        }
+        wp.update();
+      }
+    }
   }
 
   outcome.trajectory = std::move(merged);

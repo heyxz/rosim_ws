@@ -70,6 +70,7 @@ private:
 
   // ---- control handlers (run on the WS I/O thread; ROS calls are async) -----
   void handleImport(const nlohmann::json& j);
+  void handleListDir(const nlohmann::json& j);
   void handleSelectEdge(const nlohmann::json& j);
   void handleCreateSeam(const nlohmann::json& j);
   void handleDeleteSeam(const nlohmann::json& j);
@@ -89,6 +90,9 @@ private:
   void publishTcpPath(const trajectory_msgs::msg::JointTrajectory& traj);
   nlohmann::json tcpPathJsonLocked() const;
   void broadcastTcpPathLocked();
+  /// Re-broadcast the live trace tagged as final, so the viewer can replace the
+  /// cheap live polyline with the shaded tube once the run is over.
+  void broadcastTcpPathFinalLocked();
   void handleSetSpeed(const nlohmann::json& j);
   void handleSetPlanner(const nlohmann::json& j);
   void handleGetState(const nlohmann::json& j);
@@ -174,7 +178,22 @@ private:
   std::string model_id_;
   /// TCP polyline of the last executed motion (world frame), for the 3D view.
   std::vector<std::array<double, 4>> tcp_path_;  // x, y, z, speed [m/s]
+  /// Live trace while a follow action runs: the render thread appends the actual
+  /// TCP pose each frame and re-broadcasts the growing path so the browser draws
+  /// it during execution instead of only after the goal finishes.
+  bool follow_active_ = false;
+  bool has_live_tcp_ = false;
+  Eigen::Vector3d live_tcp_ = Eigen::Vector3d::Zero();
+  std::chrono::steady_clock::time_point live_stamp_{};
+  std::chrono::steady_clock::time_point live_broadcast_{};
+  /// Render thread appends the measured TCP pose and flags live_dirty_; a 5 Hz
+  /// executor-thread timer does the socket broadcast (broadcasting on the render
+  /// thread blocked frame delivery).
+  std::atomic<bool> live_dirty_{false};
+  rclcpp::TimerBase::SharedPtr live_timer_;
   std::string file_path_;
+  /// Directory the model picker starts in (empty: derive from file_path_ or cwd).
+  std::string model_dir_;
   Eigen::Isometry3d world_pose_ = Eigen::Isometry3d::Identity();
   std::vector<EdgeSummary> edges_;
   int selected_edge_ = -1;

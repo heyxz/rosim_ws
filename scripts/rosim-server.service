@@ -1,0 +1,14 @@
+[Unit]
+Description=rosim welding simulation server (ROS 2 + web 8765)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/xz/rosim_ws/scripts/run-server.sh
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

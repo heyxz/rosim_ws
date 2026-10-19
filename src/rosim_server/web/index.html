@@ -244,6 +244,28 @@
     -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
     mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
   }
+  /* The path can be long: stack the head so the title keeps its line. */
+  #file_picker .picker-head {
+    flex-direction: column; align-items: flex-start; gap: 3px;
+  }
+  #file_picker .picker-head span {
+    word-break: break-all; line-height: 1.35; font-size: 11.5px;
+  }
+  #fp_list {
+    max-height: 52vh; overflow-y: auto; margin: 0; padding: 0 2px 0 0;
+    list-style: none; display: flex; flex-direction: column; gap: 4px;
+    scrollbar-width: thin; scrollbar-color: #26313f transparent;
+  }
+  #fp_list li {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 7px 9px 7px 10px; border-radius: 7px;
+    background: #111823; border: 1px solid transparent; border-left: 2px solid #1e2836;
+    color: #c6d1e0; font-size: 12.5px; cursor: pointer;
+  }
+  #fp_list li:hover { background: #152030; border-color: #243244; border-left-color: rgba(53, 182, 255, .5); }
+  #fp_list li.fp-dir { color: #9fd0ff; }
+  #fp_list li .fp-size { color: #5d6b7d; font-family: var(--mono); font-size: 11px; }
+  #fp_list li.fp-empty { cursor: default; color: #5d6b7d; }
   #edges li {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 7px 9px 7px 10px; border-radius: 7px;
@@ -487,8 +509,8 @@
   <aside id="left" class="side">
     <section>
       <h2>工件导入</h2>
-      <label for="file_path">STEP/BREP 路径</label>
-      <input id="file_path" placeholder="/abs/path/to/workpiece.step" />
+      <label for="file_path">工件模型</label>
+      <input id="file_path" placeholder="（未选择，点下方按钮打开模型文件夹）" readonly />
       <label for="wp_x">世界位姿 位置 x/y/z (m)</label>
       <div class="row">
         <input id="wp_x" type="number" step="0.01" value="1.0" />
@@ -502,7 +524,7 @@
         <input id="wp_yaw" type="number" step="5" value="0" />
       </div>
       <div class="row" style="margin-top:9px">
-        <button id="btn_import" class="primary">导入</button>
+        <button id="btn_import" class="primary">选择工件…</button>
         <button id="btn_move_wp" disabled>移动工件</button>
       </div>
       <label class="check" for="wp_drag">
@@ -519,6 +541,20 @@
         <button id="btn_run_seams" class="primary" disabled>▶ 执行</button>
       </div>
       <ul id="seams"><li style="cursor:default">（尚未创建焊缝）</li></ul>
+      <div id="file_picker" class="modal">
+        <div class="modal-panel">
+          <div class="picker-head">选择工件模型 <span id="fp_path">—</span></div>
+          <div class="row" style="margin-bottom:8px">
+            <button id="fp_up" style="flex:1">↑ 上级目录</button>
+            <button id="fp_home" style="flex:1">模型目录</button>
+          </div>
+          <ul id="fp_list"></ul>
+          <div class="row" style="margin-top:10px">
+            <button id="fp_cancel" style="flex:1">取消</button>
+          </div>
+        </div>
+      </div>
+
       <div id="edge_picker" class="modal">
         <div class="modal-panel">
           <div class="picker-head">
@@ -591,7 +627,7 @@
       </select>
       <div class="row" style="margin-top:9px; align-items:flex-end">
         <label class="check" for="seam_uniform" style="margin:0; flex:1 1 auto">
-          <input id="seam_uniform" type="checkbox" /> 焊缝段匀速
+          <input id="seam_uniform" type="checkbox" checked /> 焊缝段匀速
         </label>
         <div style="flex:0 0 100px">
           <label for="weld_speed" style="margin:0">焊速 (mm/s)</label>
@@ -687,6 +723,11 @@ const linkShapes = new Map();   // link name -> [{ mesh, offset: Matrix4 }]
 let edgeMeshes = [];            // [{ mesh: Line, index, points: [x,y,z,...] }]
 let workpieceGroup = null;
 let tcpLine = null, tcpDots = null, tcpStart = null, tcpEnd = null, lastTcpPath = null;
+// During a live run the trace is drawn as a pre-allocated polyline that is
+// updated in place: rebuilding the tube every update made already drawn
+// segments visibly shift and starved the render loop.
+let tcpLive = null, tcpLiveGeo = null, tcpScale = 0, tcpFinished = false;
+const TCP_LIVE_MAX = 4000;
 let samplePoints = null, lastSamples = null;
 let followRunning = false;
 
@@ -705,12 +746,29 @@ function seamOverlayWanted() {
   return !followRunning && !hasPath;
 }
 
+// 执行（跟随）期间把工件上所有边的标注线一起隐藏：它们本来只是选取辅助线，
+// 跟着 TCP 轨迹一起画会把真正的加工路径盖住。
+function setEdgeLinesVisible(visible) {
+  for (const entry of edgeMeshes) entry.mesh.visible = visible;
+}
+
+function resetTcpTrace() {
+  tcpScale = 0;
+  tcpFinished = false;
+  disposeTcpObjects();
+  lastTcpPath = null;
+}
+
 function applySeamOverlayVisibility() {
+  setEdgeLinesVisible(!followRunning);
   if (seamMarker) seamMarker.visible = seamOverlayWanted();
   setSeamLabelsVisible(seamOverlayWanted());
 }
 
 function markFollowRunning(running) {
+  // A new run starts a fresh trace: reset the frozen colour ramp and drop the
+  // previous polyline so the new one grows from scratch.
+  if (running && !followRunning) resetTcpTrace();
   followRunning = running;
   applySeamOverlayVisibility();
 }
@@ -956,6 +1014,7 @@ function onWorkpiece(j) {
     const mat = new THREE.LineBasicMaterial({ color: EDGE_DEFAULT });
     const line = new THREE.Line(geo, mat);
     line.userData.edgeIndex = e.index;
+    line.userData.isEdgeLine = true;
     workpieceGroup.add(line);
     // Keep the world-frame polyline: used for click snapping and the marker.
     edgeMeshes.push({ mesh: line, index: e.index, points: e.points });
@@ -1500,13 +1559,7 @@ function renderSamples(flat) {
   worldGroup.add(samplePoints);
 }
 
-function renderTcpPath(points) {
-  lastTcpPath = Array.isArray(points) ? points : null;
-  // 消息可能早于 three.js 初始化到达
-  if (!worldGroup) {
-    setTimeout(() => renderTcpPath(lastTcpPath), 300);
-    return;
-  }
+function disposeTcpObjects() {
   for (const obj of [tcpLine, tcpDots, tcpStart, tcpEnd]) {
     if (!obj) continue;
     worldGroup.remove(obj);
@@ -1514,19 +1567,81 @@ function renderTcpPath(points) {
     obj.material.dispose();
   }
   tcpLine = tcpDots = tcpStart = tcpEnd = null;
-  if (!lastTcpPath || lastTcpPath.length < 2 || !$("show_tcp").checked) {
+  if (tcpLive) {
+    worldGroup.remove(tcpLive);
+    tcpLiveGeo.dispose();
+    tcpLive.material.dispose();
+    tcpLive = null;
+    tcpLiveGeo = null;
+  }
+}
+
+// Live trace: one pre-allocated polyline, updated in place. Rebuilding the tube
+// on every update (6-7 Hz) made the already drawn segments visibly shift and
+// starved the render loop, which also made the robot appear to stutter.
+function renderTcpPathLive(points) {
+  if (!$("show_tcp").checked) {
+    if (tcpLive) tcpLive.visible = false;
+    if (tcpLine) tcpLine.visible = false;
+    applySeamOverlayVisibility();
+    return;
+  }
+  if (!tcpLiveGeo) {
+    tcpLiveGeo = new THREE.BufferGeometry();
+    tcpLiveGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(TCP_LIVE_MAX * 3), 3));
+    // Live trace is a plain single-colour line: per-point speed colouring is
+    // only drawn once the run is finished (the tube), which also keeps the
+    // per-update work trivial.
+    tcpLive = new THREE.Line(tcpLiveGeo, new THREE.LineBasicMaterial({
+      color: 0x39d98a, depthTest: false, depthWrite: false, toneMapped: false }));
+    tcpLive.renderOrder = 30;
+    tcpLive.frustumCulled = false;
+    worldGroup.add(tcpLive);
+  }
+  const n = Math.min(points.length, TCP_LIVE_MAX);
+  const pos = tcpLiveGeo.attributes.position.array;
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2];
+  }
+  tcpLiveGeo.attributes.position.needsUpdate = true;
+  tcpLiveGeo.setDrawRange(0, n);
+  tcpLive.visible = true;
+  tcpLine = tcpLine || null;
+  applySeamOverlayVisibility();
+}
+
+function renderTcpPath(points, isFinal) {
+  lastTcpPath = Array.isArray(points) ? points : null;
+  // 消息可能早于 three.js 初始化到达
+  if (!worldGroup) {
+    setTimeout(() => renderTcpPath(lastTcpPath, isFinal), 300);
+    return;
+  }
+  if (!lastTcpPath || lastTcpPath.length < 2) {
+    disposeTcpObjects();
+    applySeamOverlayVisibility();
+    return;
+  }
+  if (!isFinal) {
+    if (tcpFinished) return;      // ignore late live frames after the final path
+    if (tcpLine) { worldGroup.remove(tcpLine); tcpLine.geometry.dispose(); tcpLine.material.dispose(); tcpLine = null; }
+    renderTcpPathLive(lastTcpPath);
+    return;
+  }
+  tcpFinished = true;
+  // Final: replace the growing line with the shaded, speed-coloured tube.
+  disposeTcpObjects();
+  if (!$("show_tcp").checked) {
     applySeamOverlayVisibility();
     return;
   }
 
-  // 第 4 个分量是 TCP 速度，用颜色编码：蓝(慢) -> 青 -> 绿 -> 黄 -> 红(快)
-  // 按 p90 归一化：直接用最大值会被接近段的尖峰（0.8 m/s）压扁整条焊缝，
-  // 用固定量程又和实际进给速度对不上。p90 对尖峰稳健，且保留相对差异。
   const sortedV = lastTcpPath.map((p) => p[3] || 0).sort((a, b) => a - b);
-  const V_FULL_SCALE = Math.max(1e-4, sortedV[Math.floor(0.9 * (sortedV.length - 1))]);
+  const V_FULL_SCALE = tcpScale || Math.max(1e-4, sortedV[Math.floor(0.9 * (sortedV.length - 1))]);
   // 慢 -> 快：绿 -> 黄 -> 红。刻意避开蓝色系，和蓝色的焊缝高亮区分开
-  const speedColor = (v) => {
-    const t = Math.min(1, Math.max(0, v / V_FULL_SCALE));
+  const speedColor = (v_) => {
+    const t = Math.min(1, Math.max(0, v_ / V_FULL_SCALE));
     const c = new THREE.Color();
     if (t < 0.5) {
       const u = t / 0.5;
@@ -1537,10 +1652,7 @@ function renderTcpPath(points) {
     }
     return c;
   };
-  // WebGL 的 LineBasicMaterial.linewidth 在绝大多数平台被忽略（永远 1 像素），
-  // 所以用管道把轨迹画成有厚度的实体，和焊缝标记同一套画法。
   const curvePts = lastTcpPath.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
-  // 用折线而不是 Catmull-Rom：样条会在拐点处外凸，把本该笔直的焊缝画弯
   const curve = new THREE.CurvePath();
   for (let i = 1; i < curvePts.length; i++)
     curve.add(new THREE.LineCurve3(curvePts[i - 1], curvePts[i]));
@@ -1548,7 +1660,6 @@ function renderTcpPath(points) {
   const radial = 6;
   const geo = new THREE.TubeGeometry(curve, segs, 0.0016, radial, false);
 
-  // 顶点色：每个管道截面一圈用同一个速度色
   const perRing = radial + 1;
   const cnt = geo.attributes.position.count;
   const col = new Float32Array(cnt * 3);
@@ -1638,6 +1749,9 @@ function onJson(j) {
     case "scene":
       onScene(j);
       break;
+    case "dir_listing":
+      renderDirListing(j);
+      break;
     case "workpiece":
       onWorkpiece(j);
       $("btn_new_seam").disabled = false;
@@ -1662,7 +1776,7 @@ function onJson(j) {
       renderSamples(j.points);
       break;
     case "tcp_path":
-      renderTcpPath(j.points);
+      renderTcpPath(j.points, !!j.final);
       break;
     case "follow_feedback":
       $("progress_fill").style.width = (j.progress * 100) + "%";
@@ -1703,9 +1817,9 @@ function onJson(j) {
 }
 
 // ---- controls ----------------------------------------------------------------
-$("btn_import").onclick = () => {
+function importSelectedModel() {
   const p = $("file_path").value.trim();
-  if (!p) { log("请输入工件路径", "err"); return; }
+  if (!p) { log("请先选择工件模型", "err"); return; }
   // Lock move/drag until the import broadcast arrives: a move sent with the
   // previous model_id while the planning node swaps workpieces is rejected.
   wpPendingFromDrag = false;
@@ -1717,7 +1831,60 @@ $("btn_import").onclick = () => {
     setWorkpieceMovePending(false);
     log("导入超时：服务器未确认", "err");
   }, 30000);
-};
+}
+
+// ---- model picker ------------------------------------------------------------
+let fpParent = "";
+let fpRoot = "";
+
+function openModelPicker() {
+  $("file_picker").classList.add("open");
+  send({ type: "list_dir" });
+}
+
+function closeModelPicker() {
+  $("file_picker").classList.remove("open");
+}
+
+function renderDirListing(msg) {
+  fpParent = msg.parent || "";
+  fpRoot = msg.root || msg.path || "";
+  $("fp_path").textContent = msg.path || "—";
+  const ul = $("fp_list");
+  ul.innerHTML = "";
+  const entries = msg.entries || [];
+  if (!entries.length) {
+    ul.innerHTML = '<li class="fp-empty">（这个目录里没有子目录或 STEP/BREP/IGES 文件）</li>';
+    return;
+  }
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    if (entry.dir) li.className = "fp-dir";
+    const name = document.createElement("span");
+    name.textContent = (entry.dir ? "📁 " : "📄 ") + entry.name;
+    li.appendChild(name);
+    if (!entry.dir && entry.size) {
+      const size = document.createElement("span");
+      size.className = "fp-size";
+      size.textContent = (entry.size / 1024).toFixed(0) + " KB";
+      li.appendChild(size);
+    }
+    li.onclick = () => {
+      const target = (msg.path.endsWith("/") ? msg.path : msg.path + "/") + entry.name;
+      if (entry.dir) { send({ type: "list_dir", path: target }); return; }
+      $("file_path").value = target;
+      closeModelPicker();
+      importSelectedModel();
+    };
+    ul.appendChild(li);
+  });
+}
+
+$("btn_import").onclick = openModelPicker;
+$("fp_cancel").onclick = closeModelPicker;
+$("fp_up").onclick = () => { if (fpParent) send({ type: "list_dir", path: fpParent }); };
+$("fp_home").onclick = () => { if (fpRoot) send({ type: "list_dir", path: fpRoot }); };
+$("file_picker").onclick = (e) => { if (e.target === $("file_picker")) closeModelPicker(); };
 
 $("btn_move_wp").onclick = () => {
   if (!workpiecePose) { log("请先导入工件", "err"); return; }

@@ -88,11 +88,15 @@ public:
     std::vector<double> consistency_limits;  ///< per-joint rad, along-edge continuity
     double eef_step_translation = 0.004;
     double eef_step_rotation = 0.05;
-    double jump_threshold_factor = 2.5;  ///< tighter than the 4.0 default: a
-                                         ///< loose factor lets the chained IK
-                                         ///< leap branches mid-edge (observed
-                                         ///< j1 swinging 165° backward) and
-                                         ///< strand the traversal
+    // Absolute per-step limit, not MoveIt's default *relative* factor.
+    // A relative factor compares each step with the running average, so a
+    // legitimate 90 deg corner pivot (pivot_step_rad = 0.1 rad per step) is
+    // rejected on an otherwise straight seam while still allowing nothing
+    // genuinely dangerous. An absolute limit passes the pivot and still catches
+    // the failure the relative one was added for: chained IK leaping branches
+    // mid-edge (observed j1 swinging 165° = 2.9 rad backward).
+    double jump_threshold_revolute = 0.35;   ///< rad per cartesian step
+    double jump_threshold_prismatic = 0.05;  ///< m per cartesian step
     double min_cartesian_fraction = 0.95;
     int max_relocations = 3;             ///< L3 degradation retries
     double allowed_planning_time = 8.0;

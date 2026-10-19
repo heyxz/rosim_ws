@@ -102,6 +102,8 @@ def generate_launch_description():
             {"width": 1280},
             {"height": 720},
             {"quality": 70},
+            # Where the in-page model picker starts browsing.
+            {"model_dir": os.path.join(desc_share, "meshes")},
         ],
         output="screen",
     )
