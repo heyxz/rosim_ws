@@ -9,6 +9,7 @@ string model_id
 rosim_interfaces/SeamSpec[] seams
 
 uint8 orientation_mode
+geometry_msgs/Quaternion fixed_orientation   # used when orientation_mode = 1 (FIXED)
 float64 tangent_tilt
 float64 tool_offset
 float64 approach_distance

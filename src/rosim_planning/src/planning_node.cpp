@@ -1153,6 +1153,10 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
     params.corner_threshold_deg = goal->corner_threshold_deg;
     params.corner_orient_window = goal->corner_orient_window;
     params.orientation_mode = goal->orientation_mode;
+    params.fixed_orientation = Eigen::Quaterniond(goal->fixed_orientation.w,
+                                                  goal->fixed_orientation.x,
+                                                  goal->fixed_orientation.y,
+                                                  goal->fixed_orientation.z);
     params.tangent_tilt = goal->tangent_tilt;
     params.tool_offset = goal->tool_offset;
     params.approach_distance = goal->approach_distance;

@@ -529,6 +529,7 @@
         <option value="0">切线 (TANGENT)</option>
         <option value="1">固定 (FIXED)</option>
         <option value="2">法向 (NORMAL)</option>
+        <option value="3">俯视 · 枪轴竖直向下（XY 拐角只偏转）</option>
       </select>
       <label for="direction">运行方向</label>
       <select id="direction">
@@ -1373,6 +1374,10 @@ function renderSeams() {
       renderSeams();
       $("btn_run_seams").disabled = selectedSeamIds.size === 0;
       updateRunLabel();
+      // 单缝“跟随”按钮跟着选中状态走（多选执行是另一个按钮）
+      const picked = seams.find((x) => x.id === selectedSeam);
+      $("btn_follow").disabled = !picked;
+      highlightSeam(picked);
     };
     const [renameBtn, delBtn] = li.querySelectorAll(".acts button");
     renameBtn.onclick = (ev) => {
@@ -1561,9 +1566,13 @@ function cornerParams() {
 $("btn_follow").onclick = () => {
   const sm = seams.find((s) => s.id === selectedSeam);
   if (!sm && selectedEdge < 0) return;
+  const modeSel = parseInt($("orientation_mode").value, 10);
   const payload = {
     type: "follow",
-    orientation_mode: parseInt($("orientation_mode").value, 10),
+    // 3 = 俯视模式：FIXED + tool Z 指向世界 -Z。焊枪竖直时 XY 平面拐角
+    // 只是绕自身轴的偏转，枪身不会扫到工件。
+    orientation_mode: modeSel === 3 ? 1 : modeSel,
+    fixed_orientation: modeSel === 3 ? { x: 1, y: 0, z: 0, w: 0 } : undefined,
     direction: parseInt($("direction").value, 10),
     tangent_tilt: parseFloat($("tangent_tilt").value) || 0,
     tool_offset: parseFloat($("tool_offset").value) || 0,
@@ -1605,10 +1614,12 @@ function updateRunLabel() {
 $("btn_run_seams").onclick = () => {
   const ids = Array.from(selectedSeamIds);
   if (!ids.length) return;
+  const batchMode = parseInt($("orientation_mode").value, 10);
   send({
     type: "follow_seams",
     ids,
-    orientation_mode: parseInt($("orientation_mode").value, 10),
+    orientation_mode: batchMode === 3 ? 1 : batchMode,
+    fixed_orientation: batchMode === 3 ? { x: 1, y: 0, z: 0, w: 0 } : undefined,
     direction: parseInt($("direction").value, 10),
     tangent_tilt: parseFloat($("tangent_tilt").value) || 0,
     tool_offset: parseFloat($("tool_offset").value) || 0,
