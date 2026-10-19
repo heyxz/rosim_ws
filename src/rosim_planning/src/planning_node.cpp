@@ -1220,6 +1220,9 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
   publishTrajectory(combined, true);
   moveit_msgs::msg::RobotTrajectory rt_msg;
   combined.getRobotTrajectoryMsg(rt_msg);
+  // The server draws the TCP path from this trajectory; without it the batch
+  // view would only show the last seam's motion.
+  result->trajectory = rt_msg.joint_trajectory;
 
   feedback->phase = "executing";
   const bool ok = monitorTrajectory(

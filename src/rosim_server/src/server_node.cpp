@@ -357,6 +357,7 @@ void ServerNode::onWsMessage(const std::string& text, std::function<void(bool)> 
     // Push the current geometry snapshot so the viewer can build the scene.
     broadcastScene();
     broadcastSeamsLocked();  // seams are user data, not part of the scene
+    broadcastTcpPathLocked();
     return;
   }
   if (type == "unsubscribe_scene")
@@ -400,6 +401,14 @@ void ServerNode::onWsMessage(const std::string& text, std::function<void(bool)> 
     handleFollowSeams(j);
   else if (type == "follow")
     handleFollow(j);
+  else if (type == "clear_tcp_path")
+  {
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      tcp_path_.clear();
+    }
+    broadcastTcpPathLocked();
+  }
   else if (type == "stop")
     handleStop(j);
   else if (type == "go_home")
@@ -651,9 +660,89 @@ void ServerNode::handleFollow(const nlohmann::json& j)
     j["cartesian_fraction"] = result.result->cartesian_fraction;
     j["direction_used"] = result.result->direction_used;
     broadcastJson(std::move(j));
+    publishTcpPath(result.result->trajectory);
   };
 
   follow_client_->async_send_goal(goal, options);
+}
+
+void ServerNode::publishTcpPath(const trajectory_msgs::msg::JointTrajectory& traj)
+{
+  if (traj.points.empty() || traj.joint_names.empty())
+    return;
+
+  // Forward kinematics on a local state: the display state is owned by the
+  // render thread and must not be mutated from the executor thread.
+  moveit::core::RobotState st(model_);
+  st.setToDefaultValues();
+
+  std::vector<std::array<double, 4>> path;  // x, y, z, TCP speed [m/s]
+  path.reserve(traj.points.size());
+  Eigen::Vector3d prev = Eigen::Vector3d::Zero();
+  double prev_t = 0.0;
+  bool have_prev = false;
+  for (const auto& pt : traj.points)
+  {
+    if (pt.positions.size() != traj.joint_names.size())
+      continue;
+    st.setVariablePositions(traj.joint_names, pt.positions);
+    st.update();
+    const Eigen::Vector3d p = st.getGlobalLinkTransform("tool_tip").translation();
+    const double t = rclcpp::Duration(pt.time_from_start).seconds();
+    double v = 0.0;
+    if (have_prev && t > prev_t + 1e-6)
+      v = (p - prev).norm() / (t - prev_t);
+    path.push_back({ p.x(), p.y(), p.z(), v });
+    prev = p;
+    prev_t = t;
+    have_prev = true;
+  }
+  if (path.size() < 2)
+    return;
+
+  // Decimate: the browser only draws a few hundred segments anyway, and long
+  // seams can produce thousands of 4 mm samples.
+  constexpr std::size_t kMaxPoints = 900;
+  if (path.size() > kMaxPoints)
+  {
+    std::vector<std::array<double, 4>> thin;
+    thin.reserve(kMaxPoints);
+    const double step = static_cast<double>(path.size() - 1) / (kMaxPoints - 1);
+    for (std::size_t i = 0; i < kMaxPoints; ++i)
+      thin.push_back(path[static_cast<std::size_t>(i * step + 0.5)]);
+    path.swap(thin);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    tcp_path_ = path;
+  }
+  broadcastTcpPathLocked();
+}
+
+nlohmann::json ServerNode::tcpPathJsonLocked() const
+{
+  nlohmann::json j;
+  j["type"] = "tcp_path";
+  j["points"] = nlohmann::json::array();
+  for (const auto& p : tcp_path_)
+    j["points"].push_back({ p[0], p[1], p[2], p[3] });
+  return j;
+}
+
+void ServerNode::broadcastTcpPathLocked()
+{
+  std::vector<std::array<double, 4>> snapshot;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    snapshot = tcp_path_;
+  }
+  nlohmann::json j;
+  j["type"] = "tcp_path";
+  j["points"] = nlohmann::json::array();
+  for (const auto& p : snapshot)
+    j["points"].push_back({ p[0], p[1], p[2], p[3] });
+  broadcastJson(std::move(j));
 }
 
 void ServerNode::handleStop(const nlohmann::json& /*j*/)
@@ -1558,6 +1647,7 @@ void ServerNode::handleFollowSeams(const nlohmann::json& j)
     o["failed_messages"] = r.failed_messages;
     broadcastJson(std::move(o));
     broadcastSeamsLocked();  // refreshed last_result marks
+    publishTcpPath(r.trajectory);
   };
 
   follow_seams_client_->async_send_goal(goal, options);

@@ -372,6 +372,19 @@
   #log div { white-space: pre-wrap; word-break: break-word; }
   #log .err { color: var(--err); }
   #log .note { color: var(--warn); }
+  .view-tools {
+    position: absolute; top: 12px; right: 14px; z-index: 5;
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(14, 20, 30, .82); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; font-size: 12px;
+  }
+  .view-tools label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); }
+  .view-tools input[type="checkbox"] { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+  .view-tools button {
+    width: auto; margin: 0; padding: 3px 9px; font-size: 12px;
+    background: transparent; border: 1px solid var(--line); color: var(--muted);
+  }
+  .view-tools button:hover { color: var(--fg); border-color: var(--accent); }
   #log .ok { color: var(--ok); }
 
   /* ---------- view ---------- */
@@ -518,6 +531,10 @@
 
   <div id="view">
     <div class="view-tag">3D 工作单元 · 实时</div>
+    <div class="view-tools">
+      <label for="show_tcp"><input id="show_tcp" type="checkbox" checked /> TCP 轨迹</label>
+      <button id="btn_clear_tcp">清除</button>
+    </div>
     <div class="hint">左键旋转 · 右键平移 · 滚轮缩放 · 点击焊缝或工件表面选中</div>
   </div>
 
@@ -641,6 +658,7 @@ let worldGroup = null;          // ROS z-up -> three.js y-up (Rx -90deg)
 const linkShapes = new Map();   // link name -> [{ mesh, offset: Matrix4 }]
 let edgeMeshes = [];            // [{ mesh: Line, index, points: [x,y,z,...] }]
 let workpieceGroup = null;
+let tcpLine = null, tcpDots = null, tcpStart = null, tcpEnd = null, lastTcpPath = null;
 let workpieceSolid = null;      // surface mesh, used to snap clicks to nearby edges
 let selectionMarker = null;     // tube + end caps + label drawn for the selected edge
 let workpiecePose = null;       // last server-confirmed world pose { position, orientation }
@@ -1408,6 +1426,62 @@ function selectSeam(id) {
 
 // Draw the seam polyline as a bright tube (separate from the edge marker).
 let seamMarker = null;
+function renderTcpPath(points) {
+  lastTcpPath = Array.isArray(points) ? points : null;
+  // 消息可能早于 three.js 初始化到达
+  if (!worldGroup) {
+    setTimeout(() => renderTcpPath(lastTcpPath), 300);
+    return;
+  }
+  for (const obj of [tcpLine, tcpDots, tcpStart, tcpEnd]) {
+    if (!obj) continue;
+    worldGroup.remove(obj);
+    obj.geometry.dispose();
+    obj.material.dispose();
+  }
+  tcpLine = tcpDots = tcpStart = tcpEnd = null;
+  if (!lastTcpPath || lastTcpPath.length < 2 || !$("show_tcp").checked) return;
+
+  const n = lastTcpPath.length;
+  const pos = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+  // 第 4 个分量是 TCP 速度，用颜色编码：蓝(慢) -> 青 -> 绿 -> 黄 -> 红(快)
+  let vmax = 0;
+  for (const p of lastTcpPath) vmax = Math.max(vmax, p[3] || 0);
+  const speedColor = (v) => {
+    const t = vmax > 1e-9 ? Math.min(1, Math.max(0, v / vmax)) : 0;
+    // 0.0 蓝(0.2,0.5,1.0) -> 0.5 绿(0.2,0.9,0.4) -> 1.0 红(1.0,0.25,0.2)
+    const c = new THREE.Color();
+    if (t < 0.5) c.setRGB(0.2 + 0.0 * t, 0.5 + 0.8 * t, 1.0 - 1.2 * t);
+    else c.setRGB(0.2 + 1.6 * (t - 0.5), 0.9 - 1.3 * (t - 0.5), 0.4 - 0.4 * (t - 0.5));
+    return c;
+  };
+  lastTcpPath.forEach((p, i) => {
+    pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2];
+    const c = speedColor(p[3] || 0);
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  tcpLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
+  worldGroup.add(tcpLine);
+  // 单像素线在远景下几乎看不见，叠一层同色点云把轨迹“加粗”
+  tcpDots = new THREE.Points(geo, new THREE.PointsMaterial({
+    size: 0.007, vertexColors: true, sizeAttenuation: true }));
+  worldGroup.add(tcpDots);
+
+  const dot = (p, color) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.006, 12, 12),
+                             new THREE.MeshBasicMaterial({ color }));
+    m.position.set(p[0], p[1], p[2]);
+    worldGroup.add(m);
+    return m;
+  };
+  tcpStart = dot(lastTcpPath[0], 0x31d0aa);
+  tcpEnd = dot(lastTcpPath[lastTcpPath.length - 1], 0xff8a3d);
+}
+
 function highlightSeam(sm) {
   if (seamMarker) {
     workpieceGroup.remove(seamMarker);
@@ -1489,6 +1563,9 @@ function onJson(j) {
         if (fromDrag) revertWorkpiecePreview(true);
       }
       break;
+    case "tcp_path":
+      renderTcpPath(j.points);
+      break;
     case "follow_feedback":
       $("progress_fill").style.width = (j.progress * 100) + "%";
       $("phase").textContent = j.phase + "  " + (j.progress * 100).toFixed(0) + "%";
@@ -1562,6 +1639,9 @@ function cornerParams() {
     corner_orient_window: (parseFloat($("corner_win").value) || 0) / 1000,
   };
 }
+
+$("show_tcp").onchange = () => renderTcpPath(lastTcpPath);
+$("btn_clear_tcp").onclick = () => send({ type: "clear_tcp_path" });
 
 $("btn_follow").onclick = () => {
   const sm = seams.find((s) => s.id === selectedSeam);

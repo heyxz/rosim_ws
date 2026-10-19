@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -83,6 +84,11 @@ private:
   void handleSetWorkpiecePose(const nlohmann::json& j);
   void handleJogJoint(const nlohmann::json& j);
   void handleJogCartesian(const nlohmann::json& j);
+
+  /// Turn an executed trajectory into the TCP polyline the UI draws.
+  void publishTcpPath(const trajectory_msgs::msg::JointTrajectory& traj);
+  nlohmann::json tcpPathJsonLocked() const;
+  void broadcastTcpPathLocked();
   void handleSetSpeed(const nlohmann::json& j);
   void handleSetPlanner(const nlohmann::json& j);
   void handleGetState(const nlohmann::json& j);
@@ -166,6 +172,8 @@ private:
   };
   std::mutex state_mutex_;
   std::string model_id_;
+  /// TCP polyline of the last executed motion (world frame), for the 3D view.
+  std::vector<std::array<double, 4>> tcp_path_;  // x, y, z, speed [m/s]
   std::string file_path_;
   Eigen::Isometry3d world_pose_ = Eigen::Isometry3d::Identity();
   std::vector<EdgeSummary> edges_;
