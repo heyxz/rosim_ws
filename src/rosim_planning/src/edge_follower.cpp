@@ -6,6 +6,7 @@
 
 #include "rosim_planning/edge_follower.h"
 
+#include "rosim_core/corner_planner.h"
 #include "rosim_planning/parallel.h"
 
 #include <algorithm>
@@ -478,7 +479,8 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
                                         const moveit::core::RobotState& current,
                                         const planning_scene::PlanningSceneConstPtr& scene,
                                         const std::atomic<bool>& cancel,
-                                        const FeedbackCb& feedback)
+                                        const FeedbackCb& feedback,
+                                        const NoteCb& note)
 {
   EdgeFollowOutcome outcome;
   const moveit::core::JointModelGroup* group = model_->getJointModelGroup(group_);
@@ -501,6 +503,7 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   // the real carriage position, so the controller snapped the rail there on
   // the first control cycle instead of driving it.
   moveit::core::RobotState ik_seed(start);
+  bool traversed_reverse = false;  // which polyline tcp_frames was built from
   auto report_error = [&](uint8_t code, const std::string& msg) {
     outcome.error_code = code;
     outcome.message = msg;
@@ -678,6 +681,7 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
     const bool reverse = params.direction == EdgeFollowParams::DIRECTION_REVERSE;
     if (!build_frames(reverse ? reversed_poly() : resampled.polyline))
       return report_error(ErrorCode::ERROR_INVALID, "edge produced <2 frames");
+    traversed_reverse = reverse;
     have_approach = tryApproach(tcp_frames, approach, approach_state);
     outcome.direction_used = reverse ? 1 : 0;
     RCLCPP_INFO(LOGGER, "direction forced: %s", reverse ? "reverse" : "forward");
@@ -706,6 +710,7 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
         tcp_frames = std::move(rev_frames);
         have_approach = true;
         outcome.direction_used = 1;
+        traversed_reverse = true;
       }
     }
   }
@@ -739,6 +744,7 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
           tcp_frames = std::move(frames);
           have_approach = true;
           outcome.direction_used = 0;
+          traversed_reverse = false;
         }
       }
       if (!have_approach && allow_reverse)
@@ -749,6 +755,7 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
           tcp_frames = std::move(rev_frames);
           have_approach = true;
           outcome.direction_used = 1;
+          traversed_reverse = true;
         }
       }
       if (have_approach)
@@ -772,6 +779,36 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
     return report_error(
         ErrorCode::ERROR_IK,
         "no collision-free IK at approach pose (unreachable from either edge direction)");
+  }
+
+  // ---- corners -----------------------------------------------------------
+  // A merged seam has tangent discontinuities where its source edges meet.
+  // Replace each sharp corner with a tangent-continuous arc (bounded by
+  // params.corner_max_deviation) and rotate the tool over the same window; if
+  // the segments are too short, rotate in place instead. Everything is decided
+  // here, before execution, so the operator can be warned up front.
+  {
+    rosim::core::CornerPolicy cp;
+    cp.max_deviation =
+        params.corner_max_deviation > 0.0 ? params.corner_max_deviation : 5e-4;
+    cp.angle_threshold_deg =
+        params.corner_threshold_deg > 0.0 ? params.corner_threshold_deg : 8.0;
+    cp.orient_window = params.corner_orient_window > 0.0 ? params.corner_orient_window : 0.02;
+    const auto& active_poly = traversed_reverse ? reversed_poly() : resampled.polyline;
+    if (tcp_frames.size() == active_poly.size() && tcp_frames.size() >= 3)
+    {
+      auto cp_plan = rosim::core::blendCorners(active_poly, tcp_frames, cp);
+      if (cp_plan.frames.size() >= 2)
+        tcp_frames = std::move(cp_plan.frames);
+      outcome.corner_count = cp_plan.corners.size();
+      outcome.corner_pivot_count = cp_plan.pivot_count;
+      if (!cp_plan.summary.empty())
+      {
+        RCLCPP_INFO(LOGGER, "%s", cp_plan.summary.c_str());
+        if (note)
+          note(cp_plan.summary);
+      }
+    }
   }
 
   outcome.toolpath = tcp_frames;

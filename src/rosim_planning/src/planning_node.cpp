@@ -993,12 +993,23 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
   params.velocity_scaling = speed_scale_;
   params.acceleration_scaling = speed_scale_;
   params.direction = goal->direction;
+  params.corner_max_deviation = goal->corner_max_deviation;
+  params.corner_threshold_deg = goal->corner_threshold_deg;
 
   const auto start = snapshotCurrentState();
   scene_->setCurrentState(start);
 
+  // Corner notices go through feedback.note so the UI can show them before
+  // the trajectory is published (i.e. before the arm starts moving).
+  auto publish_note = [&](const std::string& text) {
+    auto fb = std::make_shared<FollowEdge::Feedback>();
+    fb->progress = 0.1f;
+    fb->phase = "resolving";
+    fb->note = text;
+    goal_handle->publish_feedback(fb);
+  };
   EdgeFollowOutcome outcome = follower_->execute(*edge_ptr, params, start, scene_, cancel_,
-                                                 publish_feedback);
+                                                 publish_feedback, publish_note);
 
   if (!outcome.success)
     return finish(false, outcome.error_code, outcome.cartesian_fraction, outcome.message, nullptr,
@@ -1137,6 +1148,8 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
 
     EdgeFollowParams params;
     params.direction = spec.direction;
+    params.corner_max_deviation = goal->corner_max_deviation;
+    params.corner_threshold_deg = goal->corner_threshold_deg;
     params.orientation_mode = goal->orientation_mode;
     params.tangent_tilt = goal->tangent_tilt;
     params.tool_offset = goal->tool_offset;
@@ -1154,7 +1167,12 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
       goal_handle->publish_feedback(feedback);
     };
 
-    auto outcome = follower_->execute(seam_edge, params, current, scene_, cancel_, seam_feedback);
+    auto seam_note = [&](const std::string& text) {
+      feedback->note = text;
+      goal_handle->publish_feedback(feedback);
+    };
+    auto outcome =
+        follower_->execute(seam_edge, params, current, scene_, cancel_, seam_feedback, seam_note);
     if (!outcome.success || !outcome.trajectory)
     {
       failed_idx.push_back(static_cast<uint8_t>(i));

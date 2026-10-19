@@ -41,6 +41,9 @@ struct EdgeFollowParams
   double tool_offset = 0.0;          ///< extra TCP retreat along -tool Z [m]
   double approach_distance = 0.08;   ///< approach/depart segment length [m]
   double max_waypoint_spacing = 0.005;
+  double corner_max_deviation = 5e-4;   ///< allowed off-seam distance at a corner [m]
+  double corner_threshold_deg = 8.0;    ///< corners shallower than this are ignored
+  double corner_orient_window = 0.02;   ///< +/- window used to spread the turn [m]
   double velocity_scaling = 1.0;
   double acceleration_scaling = 1.0;
 };
@@ -55,6 +58,8 @@ struct EdgeFollowOutcome
   std::unique_ptr<robot_trajectory::RobotTrajectory> trajectory;  ///< full timed plan
   std::vector<Eigen::Isometry3d> toolpath;  ///< TCP frames along the edge (RL obs / viz)
   uint8_t direction_used = 255;  ///< 0 forward, 1 reverse, 255 none (mirrors the action)
+  std::size_t corner_count = 0;       ///< corners detected on the seam
+  std::size_t corner_pivot_count = 0; ///< corners handled by in-place rotation
 };
 
 /// \brief Orchestrates: edge sampling -> approach IK -> OMPL free-space plan ->
@@ -65,6 +70,9 @@ class EdgeFollower
 public:
   /// phase strings: resolving / planning / following / done
   using FeedbackCb = std::function<void(float progress, const std::string& phase)>;
+  /// Out-of-band operator notice (corner plan, fallbacks). May be called during
+  /// resolving, i.e. before the trajectory is published.
+  using NoteCb = std::function<void(const std::string& note)>;
 
   struct Config
   {
@@ -112,7 +120,8 @@ public:
                             const moveit::core::RobotState& current,
                             const planning_scene::PlanningSceneConstPtr& scene,
                             const std::atomic<bool>& cancel,
-                            const FeedbackCb& feedback = {});
+                            const FeedbackCb& feedback = {},
+                            const NoteCb& note = {});
 
 private:
   /// Multi-seed IK for a tool0 pose with collision filtering (also public

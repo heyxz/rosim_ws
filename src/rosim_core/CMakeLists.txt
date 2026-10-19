@@ -45,6 +45,7 @@ add_library(rosim_occ SHARED
   src/occ_geometry_service.cpp
   src/edge_frame_generator.cpp
   src/seam_builder.cpp
+  src/corner_planner.cpp
 )
 set_target_properties(rosim_occ PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(rosim_occ PUBLIC
@@ -94,6 +95,10 @@ add_executable(test_occ_step test/test_occ_step.cpp)
 target_link_libraries(test_occ_step rosim_occ)
 ament_target_dependencies(test_occ_step rclcpp Eigen3)
 
+add_executable(corner_probe tools/corner_probe.cpp)
+target_link_libraries(corner_probe rosim_occ)
+ament_target_dependencies(corner_probe rclcpp Eigen3)
+
 add_executable(seam_probe tools/seam_probe.cpp)
 target_link_libraries(seam_probe rosim_occ)
 ament_target_dependencies(seam_probe rclcpp Eigen3)
@@ -112,7 +117,7 @@ if(VTK_FOUND)
     LIBRARY DESTINATION lib)
 endif()
 # probe tools usable via `ros2 run rosim_core <tool>`
-install(TARGETS seam_probe test_occ_step RUNTIME DESTINATION lib/${PROJECT_NAME})
+install(TARGETS seam_probe corner_probe test_occ_step RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 
 ament_export_include_directories(include ${ROSIM_OCCT_INCLUDES})

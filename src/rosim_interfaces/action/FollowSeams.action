@@ -13,6 +13,8 @@ float64 tangent_tilt
 float64 tool_offset
 float64 approach_distance
 float64 max_waypoint_spacing
+float64 corner_max_deviation
+float64 corner_threshold_deg
 ---
 bool success                  # at least one seam was executed
 uint8 executed
@@ -26,3 +28,4 @@ float32 progress              # 0..1 across the whole batch
 uint8 seam_index              # seam currently being planned / executed
 uint8 seam_count
 string phase                  # resolving / planning / following / executing / done
+string note                   # operator notice (corner plan / warnings), may be empty

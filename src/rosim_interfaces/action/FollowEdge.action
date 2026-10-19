@@ -28,6 +28,8 @@ float64 tangent_tilt               # TANGENT mode: lift tool Z off the tangent t
 float64 tool_offset               # TCP retreat along -tool Z before touching the edge [m]
 float64 approach_distance         # approach/depart segment length [m], default 0.08
 float64 max_waypoint_spacing      # edge sampling spacing [m], default 0.005
+float64 corner_max_deviation      # allowed distance from the seam at a corner [m]; 0 -> 0.5 mm
+float64 corner_threshold_deg      # corners shallower than this are ignored [deg]; 0 -> 8
 ---
 bool success
 uint8 ERROR_NONE=0
@@ -50,3 +52,4 @@ uint8 direction_used
 ---
 float32 progress                  # 0..1
 string phase                      # resolving / planning / following / executing / done
+string note                       # operator notice (corner plan / warnings), may be empty

@@ -633,6 +633,7 @@ void ServerNode::handleFollow(const nlohmann::json& j)
         j["type"] = "follow_feedback";
         j["progress"] = feedback->progress;
         j["phase"] = feedback->phase;
+        j["note"] = feedback->note;
         broadcastJson(std::move(j));
       };
   options.result_callback = [this](const FollowGoalHandle::WrappedResult& result) {
@@ -1517,6 +1518,7 @@ void ServerNode::handleFollowSeams(const nlohmann::json& j)
     o["seam_index"] = fb->seam_index;
     o["seam_count"] = fb->seam_count;
     o["phase"] = fb->phase;
+    o["note"] = fb->note;
     broadcastJson(std::move(o));
   };
   options.result_callback = [this, ids](const FollowSeamsGoalHandle::WrappedResult& res) {

@@ -371,6 +371,7 @@
   }
   #log div { white-space: pre-wrap; word-break: break-word; }
   #log .err { color: var(--err); }
+  #log .note { color: var(--warn); }
   #log .ok { color: var(--ok); }
 
   /* ---------- view ---------- */
@@ -1471,11 +1472,13 @@ function onJson(j) {
     case "follow_feedback":
       $("progress_fill").style.width = (j.progress * 100) + "%";
       $("phase").textContent = j.phase + "  " + (j.progress * 100).toFixed(0) + "%";
+      if (j.note) log(j.note, "note");
       break;
     case "seams_feedback":
       $("progress_fill").style.width = (j.progress * 100) + "%";
       $("phase").textContent =
         `焊缝 ${j.seam_index + 1}/${j.seam_count} · ${j.phase} ${(j.progress * 100).toFixed(0)}%`;
+      if (j.note) log(j.note, "note");
       break;
     case "seams_result": {
       $("progress_fill").style.width = j.success ? "100%" : "0";
