@@ -5,6 +5,8 @@
 
 #include "rosim_planning/planning_node.h"
 
+#include "rosim_planning/trajectory_timing.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -1106,7 +1108,9 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
   std::vector<uint8_t> failed_idx;
   std::vector<std::string> failed_msg;
   std::size_t executed = 0;
-  const bool single_seam = goal->seams.size() == 1;
+  // NOTE: "single seam" is decided from how many seams actually planned, further
+  // below - a two-seam request where one fails must still keep the weld profile
+  // of the survivor.
 
   auto finish = [&](bool success, const std::string& msg) {
     result->success = success;
@@ -1211,10 +1215,10 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
       continue;
     }
 
-    if (single_seam)
+    if (combined.size() == 0)
     {
-      // A single seam is used verbatim: it already carries the weld profile
-      // (constant seam speed, corner slowdowns, strike/extinguish ramps).
+      // The first planned seam is used verbatim: it already carries the weld
+      // profile (constant seam speed, corner slowdowns, strike/extinguish ramps).
       combined = *outcome.trajectory;
     }
     else
@@ -1235,6 +1239,7 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
 
   if (executed == 0)
     return finish(false, "no seam could be planned");
+  const bool single_seam = executed == 1;
   if (cancel_.load())
     return finish(false, "canceled before execution");
 
@@ -1257,6 +1262,11 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
         RCLCPP_WARN(LOGGER, "batch TOTG failed; keeping per-seam timings");
       if (goal->time_profile == 1)
         applyScurve(combined);
+      // The global pass re-times the batch, so the per-seam uniform grid is gone.
+      // Put the result back on an executable grid with consistent tangents,
+      // otherwise a multi-seam batch is choppy again even though every single
+      // seam was smooth (issue: TOTG produces 0.02 s next to 0.4 s segments).
+      rosim::planning::regularizeTiming(combined, model_, LOGGER);
     }
     catch (const std::exception& e)
     {
@@ -1359,7 +1369,11 @@ bool PlanningNode::monitorTrajectory(const trajectory_msgs::msg::JointTrajectory
     // final waypoint (mixed units: rad and metres for the rail). The old 0.02
     // window could return while the last segment was still executing, so the
     // next action sampled a moving, near-contact start state.
-    if (max_err < 0.003 && elapsed > 0.3)
+    // The pose check alone is not enough: a closed seam ends where it started,
+    // and a batch that revisits its final pose (e.g. the same seam twice) would
+    // be reported "done" the moment the arm happens to be near that pose. Require
+    // most of the planned duration to have elapsed as well.
+    if (max_err < 0.003 && elapsed > 0.3 && elapsed > 0.9 * total_time)
       return true;
   }
   return true;

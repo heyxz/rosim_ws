@@ -31,6 +31,7 @@ add_library(rosim_planning_core SHARED
   src/motion_planner.cpp
   src/ompl_planner.cpp
   src/edge_follower.cpp
+  src/trajectory_timing.cpp
 )
 set_target_properties(rosim_planning_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(rosim_planning_core PUBLIC

@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "rosim_core/corner_planner.h"
+#include "rosim_planning/trajectory_timing.h"
 #include "rosim_planning/parallel.h"
 
 #include <algorithm>
@@ -1639,100 +1640,9 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
       RCLCPP_WARN(LOGGER, "seam constant speed could not be applied; keeping the profile");
   }
 
-  // Regularise the time grid. The joint trajectory controller samples at 100 Hz,
-  // so a waypoint gap below one control period cannot be followed: the spline
-  // spikes on that knot and the arm visibly jerks (the "back and forth" report).
-  // The exported trajectories showed 46 gaps under 10 ms, the shortest 4.5 ms.
-  // Stretching those gaps costs a fraction of a second and makes the motion
-  // executable as planned.
-  {
-    constexpr double kMinSegment = 0.02;  // s, 2x the controller period
-    std::size_t clamped = 0;
-    for (std::size_t i = 1; i < merged->size(); ++i)
-    {
-      if (merged->getWayPointDurationFromPrevious(i) < kMinSegment)
-      {
-        merged->setWayPointDurationFromPrevious(i, kMinSegment);
-        ++clamped;
-      }
-    }
-    if (clamped > 0)
-      RCLCPP_INFO(LOGGER, "timing: clamped %zu segments shorter than 20 ms (would not be executable)",
-                  clamped);
-  }
-
-  // Resample onto a uniform 50 Hz grid. The controller interpolates linearly
-  // between waypoints (interpolation_method: none, chosen because cubic splines
-  // overshot and made the arm oscillate). With an irregular grid (0.02 s next to
-  // 0.4 s) the piecewise-constant joint velocity shows up as a staircase, i.e.
-  // the "choppy" motion. A uniform grid keeps the same path and timing but makes
-  // the velocity steps small and frequent, which reads as smooth.
-  {
-    constexpr double kPeriod = 0.05;
-    const double total =
-        merged->size() > 1 ? merged->getWayPointDurationFromStart(merged->size() - 1) : 0.0;
-    if (total > 2.0 * kPeriod && merged->size() > 3)
-    {
-      auto resampled = std::make_unique<robot_trajectory::RobotTrajectory>(model_, group);
-      const auto& vnames = group->getVariableNames();
-      std::size_t k = 0;
-      std::vector<double> qa(vnames.size()), qb(vnames.size());
-      for (double t = 0.0; t <= total + 1e-9; t += kPeriod)
-      {
-        while (k + 2 < merged->size() && merged->getWayPointDurationFromStart(k + 1) < t)
-          ++k;
-        const double t0 = merged->getWayPointDurationFromStart(k);
-        const double t1 = merged->getWayPointDurationFromStart(k + 1);
-        const double alpha = t1 > t0 + 1e-9 ? std::min(1.0, std::max(0.0, (t - t0) / (t1 - t0)))
-                                            : 1.0;
-        moveit::core::RobotState st = *merged->getWayPointPtr(k);
-        for (std::size_t j = 0; j < vnames.size(); ++j)
-        {
-          const double a = merged->getWayPoint(k).getVariablePosition(vnames[j]);
-          const double b = merged->getWayPoint(std::min(k + 1, merged->size() - 1))
-                               .getVariablePosition(vnames[j]);
-          st.setVariablePosition(vnames[j], a + alpha * (b - a));
-        }
-        st.update();
-        resampled->addSuffixWayPoint(st, resampled->size() == 0 ? 0.0 : kPeriod);
-      }
-      RCLCPP_INFO(LOGGER, "timing: resampled %zu -> %zu waypoints on a uniform 50 Hz grid",
-                  merged->size(), resampled->size());
-      *merged = std::move(*resampled);
-    }
-  }
-
-  // Fill in joint velocities and accelerations. The controller's spline
-  // interpolation consumes them: with an empty velocity array it assumes zero
-  // velocity at every waypoint, so every segment starts and ends at rest and the
-  // motion becomes a series of jerks (measured: 375 reversals on q6). Central
-  // differences on the uniform grid give the spline a consistent tangent.
-  {
-    const auto& vnames = group->getVariableNames();
-    const std::size_t n = merged->size();
-    if (n >= 3)
-    {
-      auto pos = [&](std::size_t i, std::size_t j) {
-        return merged->getWayPoint(i).getVariablePosition(vnames[j]);
-      };
-      for (std::size_t i = 0; i < n; ++i)
-      {
-        auto& wp = *merged->getWayPointPtr(i);
-        const std::size_t i0 = i > 0 ? i - 1 : 0;
-        const std::size_t i1 = i + 1 < n ? i + 1 : n - 1;
-        const double t0 = merged->getWayPointDurationFromStart(i0);
-        const double t1 = merged->getWayPointDurationFromStart(i1);
-        const double span = t1 - t0;
-        for (std::size_t j = 0; j < vnames.size(); ++j)
-        {
-          const double v =
-              (i == 0 || i + 1 == n || span < 1e-6) ? 0.0 : (pos(i1, j) - pos(i0, j)) / span;
-          wp.setVariableVelocity(vnames[j], v);
-        }
-        wp.update();
-      }
-    }
-  }
+  // Clamp, resample and fill velocities so the controller can actually follow
+  // this trajectory (see trajectory_timing.h for why all three matter).
+  rosim::planning::regularizeTiming(*merged, model_, LOGGER);
 
   outcome.trajectory = std::move(merged);
   outcome.success = true;

@@ -741,7 +741,12 @@ void ServerNode::handleFollow(const nlohmann::json& j)
     {
       // A rejected goal never produces a result callback, so the UI would wait
       // forever and keep its overlays hidden. Send a synthetic result.
-      follow_active_ = false;
+      {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        follow_active_ = false;
+        tcp_path_.clear();  // drop the stale trace of the previous run
+      }
+      broadcastTcpPathLocked();
       nlohmann::json r;
       r["type"] = "follow_result";
       r["success"] = false;
@@ -1832,7 +1837,9 @@ void ServerNode::handleFollowSeams(const nlohmann::json& j)
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         follow_active_ = false;
+        tcp_path_.clear();
       }
+      broadcastTcpPathLocked();
       nlohmann::json r;
       r["type"] = "seams_result";
       r["success"] = false;
