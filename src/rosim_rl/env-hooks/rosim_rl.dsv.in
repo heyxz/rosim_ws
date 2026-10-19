@@ -1,0 +1,1 @@
+prepend-non-duplicate;PYTHONPATH;share/@PROJECT_NAME@/python

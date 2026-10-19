@@ -1,0 +1,8 @@
+# Import a STEP/BREP workpiece at a given world pose.
+string file_path                  # absolute path to .step/.stp/.brep
+geometry_msgs/Pose world_pose     # placement in world frame
+---
+bool success
+string message
+string model_id
+rosim_interfaces/EdgeInfo[] edges

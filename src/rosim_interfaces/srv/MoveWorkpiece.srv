@@ -1,0 +1,7 @@
+# Move an already-imported workpiece to a new world pose, without re-importing
+# the STEP file. Edges and the collision object move with it.
+string model_id                  # empty = the single current workpiece
+geometry_msgs/Pose world_pose    # new placement in world frame
+---
+bool success
+string message

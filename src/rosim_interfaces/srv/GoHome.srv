@@ -1,0 +1,5 @@
+# Plan a collision-free OMPL motion from the current state back to the SRDF
+# "home" named state and execute it (no forced/blind move).
+---
+bool success
+string message

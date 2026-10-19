@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>焊接工作站 · 生产模式</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a20;
+    --panel2: #1d2129;
+    --border: #2a2f3a;
+    --text: #d7dbe2;
+    --dim: #8a91a0;
+    --accent: #35b6ff;
+    --ok: #3ecf8e;
+    --warn: #ffb454;
+    --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.45 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: .5px; flex: 1; }
+  header .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--err); display: inline-block; }
+  header .dot.on { background: var(--ok); }
+  .badge {
+    padding: 5px 14px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    background: #2a2323; color: var(--err); border: 1px solid var(--err);
+  }
+  .badge.idle { background: #16251e; color: var(--ok); border-color: var(--ok); }
+  .badge.run  { background: #14222e; color: var(--accent); border-color: var(--accent); }
+  .badge.done { background: #16251e; color: var(--ok); border-color: var(--ok); }
+  .badge.fail { background: #2a2323; color: var(--err); border-color: var(--err); }
+
+  main {
+    flex: 1; min-height: 0; display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr);
+    gap: 14px; padding: 16px 20px; overflow: hidden;
+  }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+
+  /* ---- workpiece 3D view ---- */
+  .view-card { position: relative; padding: 0; overflow: hidden; min-height: 0; }
+  #view3d { position: absolute; inset: 0; }
+  .view-hud {
+    position: absolute; top: 10px; left: 12px; right: 12px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 10px; pointer-events: none;
+  }
+  .view-hud > * { pointer-events: auto; }
+  .view-title {
+    font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim);
+    background: rgba(15, 17, 21, .75); border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 6px;
+  }
+  .view-actions { display: flex; gap: 8px; align-items: center; }
+  .view-actions .toggle {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 13px; color: var(--dim);
+    background: rgba(15, 17, 21, .78); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 8px; user-select: none;
+  }
+  .view-actions .toggle input { accent-color: var(--accent); margin: 0; }
+  .view-actions button {
+    flex: none; padding: 6px 12px; font-size: 13px; font-weight: 600;
+    letter-spacing: 0; border-radius: 8px; background: #232833;
+    color: var(--text); border: 1px solid var(--border); cursor: pointer;
+  }
+  .view-actions button:hover { border-color: var(--accent); }
+  .view-empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px;
+    color: var(--dim); font-size: 15px; text-align: center; pointer-events: none;
+  }
+  .view-empty span { font-size: 12px; opacity: .75; }
+
+  /* ---- right-hand column ---- */
+  .side { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .status-card { display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto; }
+  .phase { font-size: 20px; font-weight: 600; }
+  .phase.idle { color: var(--dim); }
+  .phase.run  { color: var(--accent); }
+  .phase.done { color: var(--ok); }
+  .phase.fail { color: var(--err); }
+  .progress { height: 12px; background: var(--bg); border-radius: 6px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .model { color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .list-card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .list-card h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); }
+  .list-card h2 span { color: var(--text); }
+  .table-wrap { flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 0; background: var(--panel2); color: var(--dim);
+    font-size: 12px; font-weight: 600; text-align: left; padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td { padding: 14px; border-bottom: 1px solid var(--border); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #1b2029; }
+  tbody tr.sel { background: #16202c; box-shadow: inset 3px 0 0 var(--accent); }
+  tbody tr:last-child td { border-bottom: none; }
+  .num { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .len { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--dim); border: 1px solid var(--border); }
+  .tag.closed { color: var(--ok); border-color: var(--ok); }
+  .empty { color: var(--dim); text-align: center; padding: 40px 0; }
+
+  footer { display: flex; gap: 14px; padding: 0 20px 20px; }
+  footer button {
+    flex: 1; padding: 20px; border-radius: 12px; font: inherit; font-size: 22px; font-weight: 700;
+    cursor: pointer; border: 1px solid var(--border); background: #232833; color: var(--text);
+    letter-spacing: 2px;
+  }
+  footer button.start { background: var(--ok); color: #06201a; border-color: var(--ok); }
+  footer button.stop  { background: transparent; color: var(--err); border-color: var(--err); }
+  footer button:disabled { opacity: .4; cursor: not-allowed; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; opacity: 0; transition: opacity .25s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #toast.err { border-color: var(--err); color: var(--err); }
+  #toast.ok  { border-color: var(--ok); color: var(--ok); }
+
+  @media (max-width: 900px) {
+    main {
+      grid-template-columns: 1fr; grid-template-rows: minmax(220px, 45vh) auto;
+      overflow-y: auto;
+    }
+    .list-card { min-height: 260px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span id="dot" class="dot"></span>
+  <h1>焊接工作站 · 生产模式</h1>
+  <span id="badge" class="badge">未连接</span>
+</header>
+
+<main>
+  <section class="card view-card">
+    <div id="view3d"></div>
+    <div class="view-hud">
+      <span class="view-title">工件视图</span>
+      <div class="view-actions">
+        <label class="toggle"><input type="checkbox" id="auto_frame" checked /> 自动定位</label>
+        <button id="btn_reset_view">复位视角</button>
+      </div>
+    </div>
+    <div id="view_empty" class="view-empty">
+      未载入工件
+      <span>请先在调试模式导入 STEP 模型</span>
+    </div>
+  </section>
+
+  <div class="side">
+    <section class="card status-card">
+      <div id="phase" class="phase idle">空闲</div>
+      <div class="progress"><div id="progress_fill"></div></div>
+      <div id="model_path" class="model">未载入工件</div>
+    </section>
+
+    <section class="card list-card">
+      <h2>焊缝列表 <span id="edge_count"></span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>焊缝</th><th>长度 (mm)</th><th>状态</th></tr></thead>
+          <tbody id="edges"><tr class="empty"><td colspan="3">尚未创建焊缝</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <button id="btn_start" class="start" disabled>开始焊接</button>
+  <button id="btn_stop" class="stop" disabled>停止</button>
+</footer>
+
+<div id="toast"></div>
+
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/OrbitControls.js"></script>
+<script src="/viewer_common.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let ws = null;
+let selectedEdge = -1;     // legacy: raw edge index (geometry only)
+let selectedSeam = -1;     // seam id currently highlighted
+let seams = [];
+let welding = false;
+let toastTimer = null;
+
+function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+
+function toast(msg, cls) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = cls || "";
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+function setConnected(on) {
+  $("dot").classList.toggle("on", on);
+  setBadge(on ? "idle" : null, on ? "空闲" : "未连接");
+  updateButtons();
+}
+
+function setBadge(cls, text) {
+  const b = $("badge");
+  b.className = "badge" + (cls ? " " + cls : "");
+  b.textContent = text;
+}
+
+function setPhase(cls, text) {
+  const p = $("phase");
+  p.className = "phase " + cls;
+  p.textContent = text;
+}
+
+function updateButtons() {
+  const connected = ws && ws.readyState === WebSocket.OPEN;
+  $("btn_start").disabled = !connected || welding || seams.length === 0;
+  $("btn_stop").disabled = !connected || !welding;
+}
+
+// ---------------------------------------------------------------------------
+// Workpiece 3D view (read-only). The operator picks a seam in the list; the
+// viewer highlights it and, when 自动定位 is on, flies the camera to it.
+// No click-to-select here on purpose: an accidental touch must not change the
+// armed weld.
+// ---------------------------------------------------------------------------
+let renderer, scene, camera, controls;
+let worldGroup = null;
+let workpieceGroup = null;
+let edgeMeshes = [];        // [{ mesh, index, points, len }]
+let workpieceBounds = null; // THREE.Box3 in ROS coordinates
+let selectionMarker = null;
+let selectionMarkerEdge = -1;
+let viewTween = null;
+const EDGE_DEFAULT = 0xffb454;   // amber, same as the debug viewer
+const EDGE_HIGHLIGHT = 0x35b6ff; // cyan
+const MARKER_RADIUS = 0.0022;
+
+function rosToThree(x, y, z) { return new THREE.Vector3(x, z, -y); }
+
+function initViewer() {
+  const view = $("view3d");
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(view.clientWidth, view.clientHeight);
+  view.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0d11);
+
+  // ROS is Z-up, three.js is Y-up: rotate the whole cell so ROS (x,y,z) maps
+  // to three (x, z, -y).
+  worldGroup = new THREE.Group();
+  worldGroup.rotation.x = -Math.PI / 2;
+  scene.add(worldGroup);
+
+  camera = new THREE.PerspectiveCamera(45, view.clientWidth / view.clientHeight, 0.01, 50);
+  camera.position.set(1.9, 1.4, 1.6);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(1.15, 0.45, -0.08);
+  controls.update();
+  controls.addEventListener("start", () => { viewTween = null; });
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const key = new THREE.DirectionalLight(0xffffff, 0.75);
+  key.position.set(2, 3, 2);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+  fill.position.set(-2, 1.2, -2);
+  scene.add(fill);
+
+  const grid = new THREE.GridHelper(2, 20, 0x232833, 0x181c23);
+  scene.add(grid);
+
+  window.addEventListener("resize", onResize);
+  if (window.ResizeObserver)
+    new ResizeObserver(onResize).observe(view);
+
+  animate();
+}
+
+function onResize() {
+  const view = $("view3d");
+  const w = view.clientWidth, h = view.clientHeight;
+  if (!w || !h) return;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (viewTween) {
+    let k = (performance.now() - viewTween.t0) / viewTween.duration;
+    k = Math.min(1, Math.max(0, k));
+    const e = k * k * (3 - 2 * k); // smoothstep
+    controls.target.lerpVectors(viewTween.fromT, viewTween.toT, e);
+    camera.position.lerpVectors(viewTween.fromP, viewTween.toP, e);
+    if (k >= 1) viewTween = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function tweenView(target, position, duration) {
+  viewTween = {
+    t0: performance.now(),
+    duration: duration || 420,
+    fromT: controls.target.clone(), toT: target.clone(),
+    fromP: camera.position.clone(), toP: position.clone()
+  };
+}
+
+function disposeGroup(group) {
+  group.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) {
+      if (o.material.map) o.material.map.dispose();
+      o.material.dispose();
+    }
+  });
+}
+
+function clearWorkpiece() {
+  if (workpieceGroup) {
+    worldGroup.remove(workpieceGroup);
+    disposeGroup(workpieceGroup);
+    workpieceGroup = null;
+  }
+  edgeMeshes = [];
+  selectionMarker = null;
+  selectionMarkerEdge = -1;
+  workpieceBounds = null;
+}
+
+function onWorkpiece(j) {
+  clearWorkpiece();
+  workpieceGroup = new THREE.Group();
+  worldGroup.add(workpieceGroup);
+  workpieceBounds = new THREE.Box3();
+
+  const m = j.mesh;
+  if (m && m.data) {
+    const { vertices, indices } = decodeMeshData(m.data, m.vcount, m.tcount);
+    const geo = buildCreasedGeometry(vertices, indices, Math.PI / 6); // 30 deg crease
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xaab6c2, roughness: 0.45, metalness: 0.25
+    });
+    const modelMatrix = poseToMatrix4(j.pos, j.quat);
+    const solid = new THREE.Mesh(geo, mat);
+    solid.applyMatrix4(modelMatrix); // mesh is local-frame
+    workpieceGroup.add(solid);
+    geo.computeBoundingBox();
+    // Bounds are kept in ROS-world space (edges are world-space too), so the
+    // local mesh box must be moved by the model pose before union.
+    if (geo.boundingBox)
+      workpieceBounds.union(geo.boundingBox.clone().applyMatrix4(modelMatrix));
+  }
+
+  for (const e of j.edges || []) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(e.points, 3));
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: EDGE_DEFAULT }));
+    line.userData.edgeIndex = e.index;
+    workpieceGroup.add(line);
+    edgeMeshes.push({ mesh: line, index: e.index, points: e.points, len: e.length });
+    for (let i = 0; i < e.points.length; i += 3)
+      workpieceBounds.expandByPoint(
+        new THREE.Vector3(e.points[i], e.points[i + 1], e.points[i + 2]));
+  }
+
+  const hasGeometry = workpieceGroup.children.length > 0;
+  $("view_empty").style.display = hasGeometry ? "none" : "flex";
+  if (j.file_path) $("model_path").textContent = j.file_path;
+
+  // New model: show the whole part in context. Do not fly to the armed seam
+  // here — the cyan marker already tells the operator where it is, and keeping
+  // the overview is more useful than a close-up of a 2 cm edge.
+  updateSelectionMarker();
+  if (hasGeometry) fitWorkpiece();
+}
+
+function fitWorkpiece() {
+  if (!workpieceBounds || workpieceBounds.isEmpty()) return;
+  const box = workpieceBounds.clone();
+  box.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const radius = Math.max(size.length() * 0.5, 0.05);
+  const fov = camera.fov * Math.PI / 180;
+  const dist = Math.max(0.45, radius / Math.sin(fov / 2) * 1.35);
+  const dir = new THREE.Vector3(0.75, 0.62, 0.75).normalize();
+  tweenView(center, center.clone().addScaledVector(dir, dist));
+}
+
+function frameEdge(index) {
+  if (!$("auto_frame").checked) return;
+  const em = edgeMeshes.find((m) => m.index === index);
+  if (!em || !em.points || em.points.length < 6) return;
+  const n = em.points.length / 3;
+  const k = Math.floor(n / 2) * 3;
+  const target = rosToThree(em.points[k], em.points[k + 1], em.points[k + 2]);
+  const dir = camera.position.clone().sub(controls.target);
+  if (dir.lengthSq() < 1e-8) dir.set(0.75, 0.62, 0.75);
+  dir.normalize();
+  const dist = Math.min(1.0, Math.max(0.38, (em.len || 0.05) * 3 + 0.35));
+  tweenView(target, target.clone().addScaledVector(dir, dist));
+}
+
+function updateSelectionMarker() {
+  // Duplicate state broadcasts arrive after every select; don't rebuild (and
+  // flicker) the marker when nothing changed.
+  if (selectionMarker && selectionMarkerEdge === selectedSeam) return;
+
+  for (const em of edgeMeshes)
+    em.mesh.material.color.set(em.index === selectedEdge ? EDGE_HIGHLIGHT : EDGE_DEFAULT);
+
+  if (selectionMarker) {
+    workpieceGroup.remove(selectionMarker);
+    disposeGroup(selectionMarker);
+    selectionMarker = null;
+  }
+  selectionMarkerEdge = selectedSeam;
+  if (selectedSeam < 0 || !workpieceGroup) return;
+
+  const sm = seams.find((x) => x.id === selectedSeam);
+  if (!sm || !sm.polyline || sm.polyline.length < 2) return;
+  const flat = [];
+  for (const p of sm.polyline) flat.push(p[0], p[1], p[2]);
+  selectionMarker = buildEdgeMarker(flat, sm.name, EDGE_HIGHLIGHT, MARKER_RADIUS);
+  if (selectionMarker)
+    workpieceGroup.add(selectionMarker);
+}
+
+function refreshSelection(frame) {
+  updateSelectionMarker();
+  if (frame) frameSeam(selectedSeam);
+}
+
+function frameSeam(id) {
+  if (!$("auto_frame").checked) return;
+  const sm = seams.find((x) => x.id === id);
+  if (!sm || !sm.polyline || !sm.polyline.length) return;
+  const mid = sm.polyline[Math.floor(sm.polyline.length / 2)];
+  const target = rosToThree(mid[0], mid[1], mid[2]);
+  const dir = camera.position.clone().sub(controls.target);
+  if (dir.lengthSq() < 1e-8) dir.set(0.75, 0.62, 0.75);
+  dir.normalize();
+  const dist = Math.min(1.0, Math.max(0.38, (sm.length || 0.05) * 3 + 0.35));
+  tweenView(target, target.clone().addScaledVector(dir, dist));
+}
+
+// ---------------------------------------------------------------------------
+// UI / WebSocket
+// ---------------------------------------------------------------------------
+function renderSeams() {
+  const tbody = $("edges");
+  tbody.innerHTML = "";
+  if (!seams.length) {
+    tbody.innerHTML = '<tr class="empty"><td colspan="3">尚未创建焊缝</td></tr>';
+    $("edge_count").textContent = "";
+    return;
+  }
+  $("edge_count").textContent = "共 " + seams.length + " 条";
+  const wrap = tbody.closest(".table-wrap");
+  const scrollTop = wrap ? wrap.scrollTop : 0;
+  seams.forEach((sm) => {
+    const tr = document.createElement("tr");
+    if (sm.id === selectedSeam) tr.className = "sel";
+    const done = sm.last_result === "ok";
+    const bad = sm.last_result === "failed";
+    const status = bad ? '<span class="tag closed">失败</span>'
+                 : done ? '<span class="tag">已完成</span>'
+                 : '<span class="tag">待执行</span>';
+    tr.innerHTML =
+      '<td>' + sm.name + '</td>' +
+      '<td class="len">' + (sm.length * 1000).toFixed(1) + '</td>' +
+      '<td>' + status + '</td>';
+    tr.onclick = () => selectSeam(sm.id);
+    tbody.appendChild(tr);
+  });
+  if (wrap) wrap.scrollTop = scrollTop;
+}
+
+function selectSeam(id) {
+  selectedSeam = id;
+  renderSeams();
+  updateButtons();
+  updateSelectionMarker();
+  refreshSelection(true);
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss://" : "ws://";
+  ws = new WebSocket(proto + location.host + "/");
+  ws.onopen = () => {
+    setConnected(true);
+    // Workpiece geometry only: no robot scene, no joint stream.
+    send({ type: "subscribe_workpiece" });
+    send({ type: "get_state" });
+  };
+  ws.onclose = () => { setConnected(false); welding = false; setTimeout(connect, 2000); };
+  ws.onerror = () => {};
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === "string") onJson(JSON.parse(ev.data));
+  };
+}
+
+function onJson(j) {
+  switch (j.type) {
+    case "workpiece":
+      onWorkpiece(j);
+      break;
+    case "state":
+      $("model_path").textContent = j.file_path || "未载入工件";
+      break;
+    case "edges":
+      // raw geometry is delivered through "workpiece"; the operator list is seams
+      break;
+    case "seams": {
+      seams = j.seams || [];
+      if (!seams.some((x) => x.id === selectedSeam))
+        selectedSeam = seams.length ? seams[0].id : -1;
+      renderSeams();
+      updateButtons();
+      updateSelectionMarker();
+      break;
+    }
+    case "status":
+      // The list row already shows what is armed; the server's "selected
+      // edge N" acknowledgement is noise, not operator feedback.
+      if (!/^selected edge\b/i.test(j.message || ""))
+        toast(j.message, j.ok ? "ok" : "err");
+      break;
+    case "seams_feedback": {
+      welding = true;
+      $("progress_fill").style.width = (j.progress * 100) + "%";
+      setPhase("run", `焊缝 ${j.seam_index + 1}/${j.seam_count} · ${j.phase}  ${(j.progress * 100).toFixed(0)}%`);
+      setBadge("run", "运行中");
+      updateButtons();
+      break;
+    }
+    case "seams_result": {
+      welding = false;
+      $("progress_fill").style.width = j.success ? "100%" : "0";
+      if (j.success) {
+        setPhase("done", "焊接完成（完成 " + j.executed + "，跳过 " + j.failed + "）");
+        setBadge("done", "完成");
+        toast("焊接完成：" + j.message, "ok");
+      } else {
+        setPhase("fail", "失败: " + (j.message || ""));
+        setBadge("fail", "失败");
+        toast("失败: " + (j.message || ""), "err");
+      }
+      updateButtons();
+      break;
+    }
+    case "follow_feedback": {
+      welding = true;
+      $("progress_fill").style.width = (j.progress * 100) + "%";
+      setPhase("run", "运行中 · " + j.phase + "  " + (j.progress * 100).toFixed(0) + "%");
+      setBadge("run", "运行中");
+      updateButtons();
+      break;
+    }
+    case "follow_result": {
+      welding = false;
+      $("progress_fill").style.width = j.success ? "100%" : "0";
+      if (j.success) {
+        setPhase("done", "焊接完成");
+        setBadge("done", "完成");
+        toast("焊接完成", "ok");
+      } else {
+        setPhase("fail", "失败: " + (j.message || ("错误 " + j.error_code)));
+        setBadge("fail", "失败");
+        toast("失败: " + (j.message || ("错误 " + j.error_code)), "err");
+      }
+      updateButtons();
+      break;
+    }
+  }
+}
+
+$("btn_start").onclick = () => {
+  if (!seams.length || welding) return;
+  welding = true;
+  $("progress_fill").style.width = "0";
+  setPhase("run", "运行中 · 发送指令…");
+  setBadge("run", "运行中");
+  updateButtons();
+  // Weld params come from the process recipe, not the operator: the server
+  // applies the tangent orientation with a safe lead angle and no offset.
+  // Production runs the whole seam program in list order.
+  send({ type: "follow_seams", ids: seams.map((x) => x.id) });
+};
+$("btn_stop").onclick = () => {
+  send({ type: "stop" });
+  welding = false;
+  setPhase("idle", "空闲");
+  setBadge("idle", "空闲");
+  updateButtons();
+  toast("已发送停止指令");
+};
+
+$("btn_reset_view").onclick = () => {
+  if (selectedSeam >= 0 && $("auto_frame").checked) frameSeam(selectedSeam);
+  else fitWorkpiece();
+};
+$("auto_frame").onchange = () => {
+  if ($("auto_frame").checked) frameSeam(selectedSeam);
+};
+
+initViewer();
+connect();
+</script>
+</body>
+</html>

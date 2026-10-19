@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SRDF for the MOTOMAN-GP12 rosim robot.
+  The disable_collisions set below is MEASURED (rosim_planning/acm_probe,
+  empty-ACM scan: zeros + candidate homes + 3000 random states, FCL on the
+  GP12 CAD collision meshes) — a missing adjacent/always pair makes KDL IK
+  fail on every seed (classic pitfall). SOMETIMES pairs are deliberately
+  KEPT enabled (real protections): base/link3, base/link4, base/link5,
+  flange/link1, link1/link4, link1/link5.
+-->
+<robot name="rosim_robot">
+
+  <!-- 6-DOF arm chain: KDL IK and Cartesian interpolation operate on this
+       group so the wrist solver stays square. -->
+  <group name="arm">
+    <chain base_link="base_link" tip_link="tool0"/>
+  </group>
+
+  <!-- 7-DOF planning group: arm + linear rail. OMPL plans this composite
+       group, so free-space moves and between-station relocations translate
+       the carriage as well as the arm. -->
+  <group name="manipulator">
+    <group name="arm"/>
+    <joint name="rail_joint"/>
+  </group>
+
+  <virtual_joint name="world_to_base" type="fixed" parent_frame="world" child_link="rail_base_link"/>
+
+  <!-- parked working pose, matches mock hardware initial_value
+       (wire TCP at (1.251, 0, 0.928) with the rail at 0, torch pointing
+       down-forward). Kept 0.2 m above a workpiece parked at the default
+       z=0.60: the old low home (TCP z=0.525) sat inside the part and made
+       GoHome refuse. -->
+  <group_state name="home" group="arm">
+    <joint name="j1" value="0"/>
+    <joint name="j2" value="0.0"/>
+    <joint name="j3" value="-0.5"/>
+    <joint name="j4" value="0"/>
+    <joint name="j5" value="0.3"/>
+    <joint name="j6" value="0"/>
+  </group_state>
+  <group_state name="home" group="manipulator">
+    <joint name="j1" value="0"/>
+    <joint name="j2" value="0.0"/>
+    <joint name="j3" value="-0.5"/>
+    <joint name="j4" value="0"/>
+    <joint name="j5" value="0.3"/>
+    <joint name="j6" value="0"/>
+    <joint name="rail_joint" value="0"/>
+  </group_state>
+
+  <!-- all-zeros boot pose (vendor CAD export pose, arm straight up) -->
+  <group_state name="zeros" group="arm">
+    <joint name="j1" value="0"/>
+    <joint name="j2" value="0"/>
+    <joint name="j3" value="0"/>
+    <joint name="j4" value="0"/>
+    <joint name="j5" value="0"/>
+    <joint name="j6" value="0"/>
+  </group_state>
+  <group_state name="zeros" group="manipulator">
+    <joint name="j1" value="0"/>
+    <joint name="j2" value="0"/>
+    <joint name="j3" value="0"/>
+    <joint name="j4" value="0"/>
+    <joint name="j5" value="0"/>
+    <joint name="j6" value="0"/>
+    <joint name="rail_joint" value="0"/>
+  </group_state>
+
+  <!-- seventh axis: rail / carriage / robot-base contact pairs. The rail
+       profile runs under the whole track, so the arm links are NOT disabled
+       against it — reaching below the carriage plate onto the rail is a real
+       collision. -->
+  <disable_collisions link1="rail_base_link" link2="rail_carriage" reason="Adjacent"/>
+  <disable_collisions link1="rail_carriage" link2="base_link" reason="Adjacent"/>
+  <disable_collisions link1="rail_base_link" link2="base_link" reason="Never"/>
+  <disable_collisions link1="rail_base_link" link2="link1" reason="Never"/>
+  <disable_collisions link1="rail_carriage" link2="link1" reason="Never"/>
+
+  <!-- adjacent links (bearings touch or interlock in most states) -->
+  <disable_collisions link1="base_link" link2="link1" reason="Adjacent"/>
+  <disable_collisions link1="link1" link2="link2" reason="Adjacent"/>
+  <disable_collisions link1="link2" link2="link3" reason="Adjacent"/>
+  <disable_collisions link1="link3" link2="link4" reason="Adjacent"/>
+  <disable_collisions link1="link4" link2="link5" reason="Adjacent"/>
+  <disable_collisions link1="link5" link2="flange" reason="Adjacent"/>
+
+  <!-- never in contact over the scanned envelope (frame-only tool links incl.) -->
+  <disable_collisions link1="base_link" link2="link2" reason="Never"/>
+  <disable_collisions link1="flange" link2="link2" reason="Never"/>
+  <disable_collisions link1="flange" link2="link3" reason="Never"/>
+  <disable_collisions link1="flange" link2="link4" reason="Never"/>
+  <disable_collisions link1="link1" link2="link3" reason="Never"/>
+  <disable_collisions link1="link2" link2="link4" reason="Never"/>
+  <disable_collisions link1="link2" link2="link5" reason="Never"/>
+  <disable_collisions link1="link3" link2="link5" reason="Never"/>
+
+  <!-- tool chain: the welding torch (tool_tip) is a rigid flange extension, so
+       it self-collides with the arm in no reachable pose. Disabled against every
+       robot link; the workpiece stays a live obstacle for it (welding standoff). -->
+  <disable_collisions link1="flange" link2="tool0" reason="Adjacent"/>
+  <disable_collisions link1="tool0" link2="tool_tip" reason="Adjacent"/>
+  <disable_collisions link1="flange" link2="tool_tip" reason="Default"/>
+  <disable_collisions link1="base_link" link2="tool_tip" reason="Never"/>
+  <disable_collisions link1="link1" link2="tool_tip" reason="Never"/>
+  <disable_collisions link1="link2" link2="tool_tip" reason="Never"/>
+  <disable_collisions link1="link3" link2="tool_tip" reason="Never"/>
+  <disable_collisions link1="link4" link2="tool_tip" reason="Never"/>
+  <disable_collisions link1="link5" link2="tool_tip" reason="Never"/>
+
+</robot>

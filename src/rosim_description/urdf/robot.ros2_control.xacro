@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!-- ros2_control mock hardware: mock_components/GenericSystem.
+     The controller_manager interpolates trajectory commands and publishes
+     /joint_states, giving us a full execution loop without physics simulation. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="rosim_ros2_control">
+
+    <ros2_control name="rosim_robot" type="system">
+      <hardware>
+        <plugin>mock_components/GenericSystem</plugin>
+        <param name="mock_sensor_commands">false</param>
+        <param name="calculate_dynamics">false</param>
+      </hardware>
+
+      <!-- initial_value matches SRDF "home" so the mock hardware boots directly
+           in a sane, non-singular pose (no first-frame jump). If a ros2_control
+           version ignores initial_value, the planning node's homing move covers it. -->
+      <xacro:macro name="rosim_joint" params="name initial">
+        <joint name="${name}">
+          <command_interface name="position"/>
+          <state_interface name="position">
+            <param name="initial_value">${initial}</param>
+          </state_interface>
+          <state_interface name="velocity"/>
+        </joint>
+      </xacro:macro>
+
+      <xacro:rosim_joint name="j1" initial="0.0"/>
+      <xacro:rosim_joint name="j2" initial="0.0"/>
+      <xacro:rosim_joint name="j3" initial="-0.5"/>
+      <xacro:rosim_joint name="j4" initial="0.0"/>
+      <xacro:rosim_joint name="j5" initial="0.3"/>
+      <xacro:rosim_joint name="j6" initial="0.0"/>
+      <!-- 7th axis: rail carriage, metres -->
+      <xacro:rosim_joint name="rail_joint" initial="0.0"/>
+    </ros2_control>
+
+  </xacro:macro>
+
+</robot>

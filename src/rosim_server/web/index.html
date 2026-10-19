@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rosim_server · 调试模式</title>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg-deep: #070a0e;
+    --panel: #0f141b;
+    --card: #141a23;
+    --card-2: #18202b;
+    --line: #202935;
+    --line-soft: #1a222c;
+    --text: #e6ecf4;
+    --dim: #8b97a8;
+    --dim-2: #5f6b7c;
+    --accent: #35b6ff;
+    --accent-2: #7ce0ff;
+    --ok: #3ecf8e;
+    --warn: #ffb454;
+    --err: #ff7070;
+    --r: 9px;
+    --mono: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background:
+      radial-gradient(1100px 520px at 50% -12%, #131d28 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 13px/1.45 "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: center; gap: 14px;
+    height: 54px; padding: 0 16px; flex: 0 0 auto;
+    background: linear-gradient(180deg, #111823 0%, #0c1219 100%);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .025) inset, 0 10px 30px -22px #000;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 26px; height: 26px; border-radius: 8px; position: relative;
+    background: linear-gradient(145deg, #4cc2ff 0%, #0b6ea8 100%);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .4) inset, 0 4px 14px -5px rgba(53, 182, 255, .8);
+  }
+  .brand-mark::after {
+    content: ""; position: absolute; inset: 7px; border-radius: 3px;
+    border: 2px solid rgba(4, 15, 24, .8); transform: rotate(45deg);
+  }
+  header h1 {
+    font-size: 14px; margin: 0; font-weight: 650; letter-spacing: .2px;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  header h1 .sub {
+    font-size: 11px; font-weight: 500; color: var(--dim-2); letter-spacing: .05em;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 26px; padding: 0 10px 0 9px; border-radius: 999px;
+    background: #0d141d; border: 1px solid var(--line);
+    font-size: 11.5px; color: var(--dim); letter-spacing: .02em;
+  }
+  header .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--err);
+    box-shadow: 0 0 0 3px rgba(255, 112, 112, .12); transition: .2s;
+  }
+  header .dot.on {
+    background: var(--ok);
+    box-shadow: 0 0 0 3px rgba(62, 207, 142, .15), 0 0 9px rgba(62, 207, 142, .85);
+  }
+  .metrics { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .chip {
+    font: 11.5px/1 var(--mono); font-variant-numeric: tabular-nums;
+    color: var(--dim); background: #0b1119; border: 1px solid var(--line-soft);
+    padding: 6px 9px; border-radius: 6px; white-space: nowrap;
+  }
+  .chip.hint-chip { color: var(--dim-2); background: transparent; border-color: transparent; }
+
+  /* ---------- layout ---------- */
+  /* Lowercase-n layout: the header spans the top, the setup panels run down
+     the left leg and the execution panels down the right leg, with the 3D
+     view filling the space between them. */
+  main {
+    flex: 1; min-height: 0; display: grid;
+    grid-template-columns: clamp(262px, 19vw, 300px) minmax(0, 1fr) clamp(324px, 23vw, 356px);
+    grid-template-areas: "left view right";
+  }
+  aside.side {
+    min-height: 0; overflow-y: auto; overflow-x: hidden;
+    background: var(--panel); padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+    scrollbar-width: thin; scrollbar-color: #26313f transparent;
+  }
+  #left { grid-area: left; border-right: 1px solid var(--line); }
+  #right { grid-area: right; border-left: 1px solid var(--line); }
+
+  /* ---------- cards ---------- */
+  section {
+    background: linear-gradient(180deg, var(--card) 0%, #121821 100%);
+    border: 1px solid var(--line); border-radius: var(--r);
+    padding: 10px 12px 11px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .02) inset, 0 10px 26px -24px #000;
+  }
+  section h2 {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 0 8px; font-size: 11px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
+  }
+  section h2::before {
+    content: ""; width: 3px; height: 11px; border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent), rgba(53, 182, 255, .2));
+    box-shadow: 0 0 8px rgba(53, 182, 255, .55);
+  }
+
+  /* ---------- form controls ---------- */
+  label { display: block; color: var(--dim); font-size: 11.5px; margin: 7px 0 3px; letter-spacing: .01em; }
+  input, select {
+    width: 100%; height: 31px; padding: 0 9px; border-radius: 7px;
+    border: 1px solid #202a36; background: #0b1017; color: var(--text);
+    font: inherit; font-size: 12.5px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .4);
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+  input:hover, select:hover { border-color: #2a3646; }
+  input:focus, select:focus {
+    outline: none; border-color: rgba(53, 182, 255, .8); background: #0d141d;
+    box-shadow: 0 0 0 3px rgba(53, 182, 255, .14);
+  }
+  input[type="number"] { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12px; }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input::placeholder { color: #4d5867; }
+  select {
+    appearance: none; -webkit-appearance: none; padding-right: 26px; cursor: pointer;
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237d8a9b' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 9px center;
+  }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; min-width: 0; }
+  .row.jog > select { flex: 1.7; }
+  .row.jog > input { flex: 1; }
+  .row.jog > .jog-btn { flex: 0 0 34px; padding: 0; font-size: 14px; line-height: 1; color: #9fb0c2; }
+  .row.jog > .jog-btn:hover { color: var(--accent-2); border-color: rgba(53, 182, 255, .5); }
+
+  /* label 与控件同一行的紧凑排版（参数区） */
+  .inline { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 7px; }
+  .inline label { margin: 0; }
+  .inline select { flex: 0 0 132px; width: 132px; }
+
+  /* toggle switch instead of a raw checkbox */
+  label.check {
+    display: flex; align-items: center; gap: 9px; margin-top: 11px;
+    color: var(--text); font-size: 12px; cursor: pointer; user-select: none;
+  }
+  label.check input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none;
+    position: relative; flex: 0 0 auto; width: 34px; height: 19px; padding: 0;
+    border-radius: 999px; background: #1a2431; border: 1px solid #26313f;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, .55); cursor: pointer;
+    transition: background .18s, border-color .18s;
+  }
+  label.check input[type="checkbox"]::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 13px; height: 13px; border-radius: 50%; background: #6d7d8f;
+    transition: left .18s, background .18s, box-shadow .18s;
+  }
+  label.check input[type="checkbox"]:checked {
+    background: rgba(53, 182, 255, .26); border-color: rgba(53, 182, 255, .6);
+  }
+  label.check input[type="checkbox"]:checked::after {
+    left: 17px; background: var(--accent-2); box-shadow: 0 0 8px rgba(124, 224, 255, .9);
+  }
+  label.check input[type="checkbox"]:disabled { opacity: .4; cursor: not-allowed; }
+  label.check:has(input:disabled) { color: var(--dim-2); }
+
+  .note { color: var(--dim-2); font-size: 11px; line-height: 1.5; margin-top: 5px; }
+
+  /* range slider */
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; height: 22px; padding: 0;
+    border: none; background: transparent; box-shadow: none; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 999px; border: 1px solid #1b2431;
+    background: linear-gradient(90deg, rgba(53, 182, 255, .7), rgba(53, 182, 255, .12));
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; margin-top: -6px;
+    border-radius: 50%; background: var(--accent-2); border: 2px solid #08111a;
+    box-shadow: 0 0 0 3px rgba(53, 182, 255, .18), 0 2px 6px rgba(0, 0, 0, .55);
+  }
+  input[type="range"]:focus::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(53, 182, 255, .22); }
+  input[type="range"]::-moz-range-track {
+    height: 4px; border-radius: 999px; background: linear-gradient(90deg, rgba(53, 182, 255, .7), rgba(53, 182, 255, .12));
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%; background: var(--accent-2);
+    border: 2px solid #08111a; box-shadow: 0 0 0 3px rgba(53, 182, 255, .18);
+  }
+
+  /* ---------- buttons ---------- */
+  button {
+    height: 31px; padding: 0 12px; border-radius: 7px;
+    border: 1px solid #263140; color: #dbe4ef; font: inherit; font-size: 12.5px; font-weight: 500;
+    background: linear-gradient(180deg, #1b2431, #151d27);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .04) inset;
+    cursor: pointer; transition: background .15s, border-color .15s, transform .06s, box-shadow .15s;
+  }
+  button:hover { border-color: #35475d; background: linear-gradient(180deg, #212c3b, #18212c); }
+  button:active { transform: translateY(1px); }
+  button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(53, 182, 255, .28); }
+  button.primary {
+    background: linear-gradient(180deg, #4cc2ff, #1a94db);
+    border-color: #63cbff; color: #03121d; font-weight: 650;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .35) inset, 0 6px 18px -9px rgba(53, 182, 255, .95);
+  }
+  button.primary:hover { background: linear-gradient(180deg, #5fccff, #249ce2); border-color: #86d7ff; }
+  button.danger { color: #ff8a8a; background: rgba(255, 112, 112, .07); border-color: #4d2a33; }
+  button.danger:hover { background: rgba(255, 112, 112, .14); border-color: #6d3a46; }
+  button:disabled {
+    opacity: .38; cursor: not-allowed; transform: none;
+    background: linear-gradient(180deg, #161d26, #131a22); border-color: #222b38;
+    color: #7c8896; box-shadow: none; filter: saturate(.4);
+  }
+
+  /* ---------- edge list ---------- */
+  #edges {
+    max-height: 220px; overflow-y: auto; margin: 0; padding: 0 2px 0 0;
+    list-style: none; display: flex; flex-direction: column; gap: 4px;
+    scrollbar-width: thin; scrollbar-color: #26313f transparent;
+  }
+  /* The edge list is the one panel that should absorb the left leg's spare
+     height instead of leaving a dead gap under it. */
+  #left section.grow { flex: 1; display: flex; flex-direction: column; min-height: 220px; }
+  #left section.grow #edges {
+    max-height: none; flex: 1; min-height: 0;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
+  }
+  #edges li {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 7px 9px 7px 10px; border-radius: 7px;
+    background: #111823; border: 1px solid transparent; border-left: 2px solid #1e2836;
+    color: #c6d1e0; font-size: 12.5px; cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  #edges li:hover { background: #152030; border-color: #243244; border-left-color: rgba(53, 182, 255, .5); }
+  #edges li.sel {
+    color: #eaf6ff; border-color: rgba(53, 182, 255, .38); border-left-color: var(--accent);
+    background: linear-gradient(90deg, rgba(53, 182, 255, .17), rgba(53, 182, 255, .02));
+    box-shadow: 0 0 0 1px rgba(53, 182, 255, .07) inset;
+  }
+  #seams {
+    max-height: none; flex: 1; min-height: 90px; overflow-y: auto; margin: 0; padding: 0 2px 0 0;
+    list-style: none; display: flex; flex-direction: column; gap: 4px;
+    scrollbar-width: thin; scrollbar-color: #26313f transparent;
+  }
+  #seams li {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 10px; border-radius: 7px; cursor: pointer;
+    background: #111823; border: 1px solid transparent; border-left: 2px solid #1e2836;
+    color: #c6d1e0; font-size: 12.5px;
+  }
+  #seams li:hover { background: #152030; border-color: #243244; }
+  #seams li.sel {
+    color: #eaf6ff; border-color: rgba(53, 182, 255, .38); border-left-color: var(--accent);
+    background: linear-gradient(90deg, rgba(53, 182, 255, .17), rgba(53, 182, 255, .02));
+  }
+  .run-mark { display: inline-block; margin-right: 6px; font-weight: 700; }
+  .run-mark.ok { color: var(--ok); }
+  .run-mark.err { color: var(--err); }
+  #seams li > span:first-child {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;
+  }
+  #seams li .meta { color: var(--dim-2); font: 11.5px var(--mono); white-space: nowrap; }
+  #seams li.sel .meta { color: #8fd9ff; }
+  #seams li .acts { display: flex; gap: 4px; opacity: 0; transition: .12s; }
+  #seams li:hover .acts, #seams li.sel .acts { opacity: 1; }
+  #seams li .acts button { height: 22px; padding: 0 6px; font-size: 11px; }
+  .seam-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
+  .seam-toolbar button { flex: 1; height: 28px; font-size: 12px; }
+  .modal {
+    position: fixed; inset: 0; z-index: 60; background: rgba(4, 8, 12, .66);
+    display: none; align-items: center; justify-content: center; backdrop-filter: blur(3px);
+  }
+  .modal.open { display: flex; }
+  .modal-panel {
+    width: min(460px, 92vw); max-height: 82vh; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, var(--card), #121821);
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+    box-shadow: 0 24px 60px -30px #000;
+  }
+  .picker-head {
+    display: flex; justify-content: space-between; font-size: 12px; color: var(--dim);
+    margin-bottom: 8px;
+  }
+  .picker-head span { color: var(--accent-2); font-family: var(--mono); }
+  #edge_picker #edges { max-height: 52vh; }
+  #edges li .chk {
+    accent-color: var(--accent);
+    width: 15px; height: 15px; flex: 0 0 15px; margin: 0; padding: 0;
+    box-shadow: none; border: none; background: transparent;
+  }
+  #edges li label { white-space: nowrap; flex: 1; min-width: 0; }
+  #edges li .len {
+    float: none; color: var(--dim-2); font: 11.5px var(--mono);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  #edges li.sel .len { color: #8fd9ff; }
+
+  /* ---------- progress ---------- */
+  #progress {
+    height: 6px; border-radius: 999px; overflow: hidden;
+    background: #0a0f15; border: 1px solid #1b2431;
+  }
+  #progress > div {
+    height: 100%; width: 0; border-radius: 999px;
+    background: linear-gradient(90deg, #2aa7f0, var(--accent-2));
+    box-shadow: 0 0 10px rgba(53, 182, 255, .8);
+    transition: width .25s ease;
+  }
+  #phase {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+    padding: 3px 9px; border-radius: 999px; font-size: 11.5px; color: var(--dim);
+    background: #0d141c; border: 1px solid #1c2632;
+  }
+  #phase::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); opacity: .85;
+  }
+
+  /* ---------- log ---------- */
+  #right section.log-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #log {
+    flex: 1; height: 150px; min-height: 108px; overflow-y: auto;
+    font: 11.5px/1.65 var(--mono); color: #93a1b3;
+    background: #080c11; border: 1px solid #18212c; border-radius: 8px;
+    padding: 8px 10px; scrollbar-width: thin; scrollbar-color: #26313f transparent;
+  }
+  #log div { white-space: pre-wrap; word-break: break-word; }
+  #log .err { color: var(--err); }
+  #log .ok { color: var(--ok); }
+
+  /* ---------- view ---------- */
+  #view {
+    grid-area: view; min-width: 0; position: relative; overflow: hidden;
+    background: radial-gradient(1100px 640px at 58% 32%, #0f1620 0%, #070a0e 72%);
+  }
+  #view canvas { display: block; }
+  #view::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 150px rgba(0, 0, 0, .62);
+  }
+  #view .view-tag {
+    position: absolute; top: 12px; left: 12px; z-index: 2; pointer-events: none;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 9px; border-radius: 6px; font-size: 11px; letter-spacing: .06em;
+    color: #a9b7c8; background: rgba(10, 16, 23, .62);
+    border: 1px solid rgba(38, 49, 63, .9); backdrop-filter: blur(6px);
+  }
+  #view .view-tag::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 7px rgba(53, 182, 255, .9);
+  }
+  #view .hint {
+    position: absolute; left: 12px; bottom: 10px; z-index: 2; pointer-events: none;
+    color: #7f8d9e; font-size: 11.5px; padding: 4px 9px; border-radius: 6px;
+    background: rgba(10, 16, 23, .55); border: 1px solid rgba(38, 49, 63, .7);
+    backdrop-filter: blur(6px);
+  }
+
+  /* ---------- scrollbars ---------- */
+  aside.side::-webkit-scrollbar, #edges::-webkit-scrollbar, #log::-webkit-scrollbar { width: 8px; height: 8px; }
+  aside.side::-webkit-scrollbar-thumb, #edges::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb {
+    background: #26313f; border-radius: 999px; border: 2px solid transparent; background-clip: content-box;
+  }
+  aside.side::-webkit-scrollbar-thumb:hover, #edges::-webkit-scrollbar-thumb:hover, #log::-webkit-scrollbar-thumb:hover {
+    background: #3a4757; background-clip: content-box;
+  }
+  aside.side::-webkit-scrollbar-track, #edges::-webkit-scrollbar-track, #log::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 1180px) {
+    main { grid-template-columns: 258px minmax(0, 1fr) 318px; }
+  }
+  /* Short viewports (1366x768 / 1280x720 laptops): tighten vertical rhythm
+     so the log panel stays on screen instead of falling below the fold. */
+  @media (max-height: 820px) {
+    aside.side { padding: 10px; gap: 8px; }
+    section { padding: 8px 10px 9px; }
+    section h2 { margin: 0 0 6px; }
+    label { margin: 5px 0 2px; }
+    input, select, button { height: 28px; }
+    .row { gap: 6px; }
+    #progress { margin-top: 8px !important; }
+    #phase { margin-top: 6px; padding: 2px 8px; }
+    #log { min-height: 84px; }
+    .note { margin-top: 3px; }
+  }
+
+  /* Narrow windows: drop the n frame and stack view / setup / execution. */
+  @media (max-width: 1000px) {
+    main {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "view" "left" "right";
+      grid-template-rows: minmax(320px, 55vh) auto auto;
+      overflow-y: auto;
+    }
+    /* Let the stacked panels size to their content; the whole main scrolls. */
+    #left {
+      border-right: none; border-bottom: 1px solid var(--line);
+      overflow-y: visible; min-height: auto;
+    }
+    #right {
+      border-left: none; border-top: 1px solid var(--line);
+      overflow-y: visible; min-height: auto;
+    }
+    #log { height: 150px; flex: none; }
+    .metrics .chip.hint-chip { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <h1>rosim<span class="sub">调试模式</span></h1>
+  </div>
+  <span class="pill"><span id="dot" class="dot"></span><span id="conn">未连接</span></span>
+  <div class="metrics">
+    <span class="chip" id="fps">—</span>
+  </div>
+</header>
+<main>
+  <aside id="left" class="side">
+    <section>
+      <h2>工件导入</h2>
+      <label for="file_path">STEP/BREP 路径</label>
+      <input id="file_path" placeholder="/abs/path/to/workpiece.step" />
+      <label for="wp_x">世界位姿 位置 x/y/z (m)</label>
+      <div class="row">
+        <input id="wp_x" type="number" step="0.01" value="1.0" />
+        <input id="wp_y" type="number" step="0.01" value="0" />
+        <input id="wp_z" type="number" step="0.01" value="0.60" />
+      </div>
+      <label for="wp_roll">姿态 RPY (deg)</label>
+      <div class="row">
+        <input id="wp_roll" type="number" step="5" value="0" />
+        <input id="wp_pitch" type="number" step="5" value="0" />
+        <input id="wp_yaw" type="number" step="5" value="0" />
+      </div>
+      <div class="row" style="margin-top:9px">
+        <button id="btn_import" class="primary">导入</button>
+        <button id="btn_move_wp" disabled>移动工件</button>
+      </div>
+      <label class="check" for="wp_drag">
+        <input id="wp_drag" type="checkbox" disabled /> 在视图中拖动工件（X/Y 平面）
+      </label>
+      <div class="note">拖动松手后自动应用；旋转或精调请修改上方数值后点“移动工件”。</div>
+      <button id="btn_frame_wp" style="margin-top:9px; width:100%" disabled>定位到工件</button>
+    </section>
+
+    <section class="grow">
+      <h2>焊缝列表</h2>
+      <div class="seam-toolbar">
+        <button id="btn_new_seam" disabled>＋ 新建焊缝</button>
+        <button id="btn_run_seams" class="primary" disabled>▶ 执行</button>
+      </div>
+      <ul id="seams"><li style="cursor:default">（尚未创建焊缝）</li></ul>
+      <div id="edge_picker" class="modal">
+        <div class="modal-panel">
+          <div class="picker-head">
+            勾选相连的边（可多选）<span id="pick_count">0 条</span>
+          </div>
+          <ul id="edges"></ul>
+          <div class="row" style="margin-top:10px">
+            <button id="btn_pick_ok" class="primary">创建焊缝</button>
+            <button id="btn_pick_cancel">取消</button>
+          </div>
+          <div class="note">选中后点“创建焊缝”；分叉点会被拒绝并提示坐标。</div>
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <div id="view">
+    <div class="view-tag">3D 工作单元 · 实时</div>
+    <div class="hint">左键旋转 · 右键平移 · 滚轮缩放 · 点击焊缝或工件表面选中</div>
+  </div>
+
+  <aside id="right" class="side">
+    <section>
+      <h2>沿边跟随</h2>
+      <label for="orientation_mode">工具姿态模式</label>
+      <select id="orientation_mode">
+        <option value="0">切线 (TANGENT)</option>
+        <option value="1">固定 (FIXED)</option>
+        <option value="2">法向 (NORMAL)</option>
+      </select>
+      <label for="direction">运行方向</label>
+      <select id="direction">
+        <option value="0">自动（正向优先，不可达时反向）</option>
+        <option value="1">正向（从绿点起焊）</option>
+        <option value="2">反向（从绿点起焊）</option>
+      </select>
+      <div class="row">
+        <div>
+          <label for="tangent_tilt" title="TANGENT 模式下焊枪枪体绕棱边的抬起角；0 会让实际焊枪枪体贴着工件表面扫过">导前角 (rad)</label>
+          <input id="tangent_tilt" type="number" step="0.01" value="0.6" />
+        </div>
+        <div>
+          <label for="tool_offset">退刀 (m)</label>
+          <input id="tool_offset" type="number" step="0.001" value="0" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="approach">逼近段 (m)</label>
+          <input id="approach" type="number" step="0.01" value="0.08" />
+        </div>
+        <div>
+          <label for="spacing">采样间距 (m)</label>
+          <input id="spacing" type="number" step="0.001" value="0.005" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:11px">
+        <button id="btn_follow" class="primary" disabled>跟随</button>
+        <button id="btn_stop" class="danger">停止</button>
+      </div>
+      <div id="progress" style="margin-top:11px"><div id="progress_fill"></div></div>
+      <div id="phase">空闲</div>
+    </section>
+
+    <section>
+      <h2>运动</h2>
+      <label for="mv_x">移动到位姿 x/y/z（姿态=单位四元数）</label>
+      <div class="row">
+        <input id="mv_x" type="number" step="0.01" placeholder="x" />
+        <input id="mv_y" type="number" step="0.01" placeholder="y" />
+        <input id="mv_z" type="number" step="0.01" placeholder="z" />
+      </div>
+      <div class="row" style="margin-top:9px">
+        <button id="btn_home">回零 GoHome</button>
+        <button id="btn_move">执行移动</button>
+      </div>
+      <label for="jog_joint">关节微调</label>
+      <div class="row jog">
+        <select id="jog_joint">
+          <option value="j1">j1</option>
+          <option value="j2">j2</option>
+          <option value="j3">j3</option>
+          <option value="j4">j4</option>
+          <option value="j5">j5</option>
+          <option value="j6">j6</option>
+          <option value="rail_joint">rail_joint (m)</option>
+        </select>
+        <input id="jog_delta" type="number" step="0.05" value="0.1" />
+        <button id="btn_jog_plus" class="jog-btn" title="正向微调">＋</button>
+        <button id="btn_jog_minus" class="jog-btn" title="反向微调">−</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>参数</h2>
+      <label for="speed">速度倍率 <span id="speed_val" style="color:var(--accent-2); font-family:var(--mono)">1.00</span></label>
+      <input id="speed" type="range" min="0.05" max="1" step="0.05" value="1" />
+      <div class="inline">
+        <label for="planner">规划器</label>
+        <select id="planner">
+          <option value="ompl">ompl</option>
+          <option value="rl">rl</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="log-panel">
+      <h2>日志</h2>
+      <div id="log"></div>
+    </section>
+  </aside>
+</main>
+
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/OrbitControls.js"></script>
+<script src="/viewer_common.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let ws = null;
+let selectedEdge = -1;
+let currentEdges = [];
+let seams = [];              // server-owned seam list
+let selectedSeam = -1;
+let pickingEdges = false;    // edge picker (seam creation) open
+const pickedEdges = new Set();
+const selectedSeamIds = new Set();   // multi-select for batch execution
+let dragSeamId = null;               // seam being dragged for reordering
+
+// ---- three.js viewer -------------------------------------------------------
+let renderer, scene, camera, controls, raycaster, pointer;
+let worldGroup = null;          // ROS z-up -> three.js y-up (Rx -90deg)
+const linkShapes = new Map();   // link name -> [{ mesh, offset: Matrix4 }]
+let edgeMeshes = [];            // [{ mesh: Line, index, points: [x,y,z,...] }]
+let workpieceGroup = null;
+let workpieceSolid = null;      // surface mesh, used to snap clicks to nearby edges
+let selectionMarker = null;     // tube + end caps + label drawn for the selected edge
+let workpiecePose = null;       // last server-confirmed world pose { position, orientation }
+let wpDrag = null;              // active drag preview { plane, start, origin, moved, pointerId }
+let wpMovePending = false;      // waiting for the server to confirm a move
+let wpPendingFromDrag = false;
+let wpMoveTimer = null;
+let wpDragJustEnded = false;    // swallow the click that ends a drag
+const EDGE_DEFAULT = 0xffb454;   // dark amber (matches the server tube color)
+const EDGE_HIGHLIGHT = 0x35b6ff; // cyan
+const PICK_SNAP = 0.02;          // m: click on the part within 2 cm of a weld edge selects it
+const MARKER_RADIUS = 0.0022;    // m: selected-edge tube radius
+
+function log(msg, cls) {
+  const el = $("log");
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false }) + "  " + msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+
+function setConnected(on) {
+  $("dot").classList.toggle("on", on);
+  // 头部状态胶囊：连接态文字，避免只有一个色点难以判断。
+  $("conn").textContent = on ? "已连接" : "未连接";
+}
+
+function linkColor(name) {
+  if (name === "base_link") return 0x404040;
+  if (name === "rail_base_link") return 0x555b63;  // track: steel
+  if (name === "rail_carriage") return 0x2a4c75;   // carriage: blue
+  if (name.indexOf("link") === 0) return 0xf2730d; // arm links: orange
+  if (name === "tool_tip") return 0x2b2e35;        // torch: graphite
+  return 0x4d4d52;                                 // wrist: graphite
+}
+
+// decodeMeshData / buildCreasedGeometry / poseToMatrix4 live in
+// viewer_common.js so the production page can share them.
+
+function buildShapeGeometry(sh) {
+  switch (sh.kind) {
+    case "box":
+      return new THREE.BoxGeometry(sh.size[0], sh.size[1], sh.size[2]);
+    case "cylinder": {
+      // three.js cylinder axis is +Y; URDF/moveit axis is +Z (the server does
+      // the same rotateX for its VTK source).
+      const g = new THREE.CylinderGeometry(sh.radius, sh.radius, sh.height, 32);
+      g.rotateX(Math.PI / 2);
+      return g;
+    }
+    case "sphere":
+      return new THREE.SphereGeometry(sh.radius, 24, 24);
+    case "mesh": {
+      const { vertices, indices } = decodeMeshData(sh.data, sh.vcount, sh.tcount);
+      return buildCreasedGeometry(vertices, indices, Math.PI / 6);  // 30 deg crease
+    }
+    default:
+      return null;
+  }
+}
+
+function initViewer() {
+  const view = $("view");
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(view.clientWidth, view.clientHeight);
+  view.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0c0f);
+
+  // All ROS-frame geometry (robot + workpiece) lives under this group. ROS is
+  // Z-up, three.js is Y-up; rotating the group -90deg about X maps ROS
+  // (x,y,z) -> three.js (x, z, -y) so the robot stands upright on the grid.
+  worldGroup = new THREE.Group();
+  worldGroup.rotation.x = -Math.PI / 2;
+  scene.add(worldGroup);
+
+  camera = new THREE.PerspectiveCamera(50, view.clientWidth / view.clientHeight, 0.01, 100);
+  // Framed for the whole cell: 2.8 m rail plus the robot on its carriage.
+  camera.position.set(2.15, 1.72, 2.72);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.set(0.82, 0.58, 0);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.update();
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(2, 3, 2);
+  scene.add(dir);
+
+  // 4 m floor grid: the 2.8 m linear rail is the largest object in the cell.
+  const grid = new THREE.GridHelper(4, 40, 0x2a2f3a, 0x1d2129);
+  scene.add(grid);
+
+  raycaster = new THREE.Raycaster();
+  raycaster.params.Line.threshold = 0.02; // 2 cm pick tolerance on edges
+  pointer = new THREE.Vector2();
+
+  window.addEventListener("resize", onResize);
+  let downX = 0, downY = 0;
+  // Capture-phase listeners run before OrbitControls', so starting a
+  // workpiece drag can stop the camera orbit for that pointer sequence.
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    downX = e.clientX; downY = e.clientY;
+    wpDragJustEnded = false;
+    if (e.button === 0 && $("wp_drag").checked && startWorkpieceDrag(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+  renderer.domElement.addEventListener("pointermove", moveWorkpieceDrag, true);
+  renderer.domElement.addEventListener("pointerup", endWorkpieceDrag, true);
+  renderer.domElement.addEventListener("pointercancel", cancelWorkpieceDragEvent, true);
+  renderer.domElement.addEventListener("pointerup", (e) => {
+    const dx = e.clientX - downX, dy = e.clientY - downY;
+    if (wpDragJustEnded) { wpDragJustEnded = false; return; }
+    if (dx * dx + dy * dy > 25) return; // drag (orbit/pan), not a click
+    pick(e);
+  });
+
+  animate();
+}
+
+function onResize() {
+  const view = $("view");
+  const w = view.clientWidth, h = view.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+
+let frames = 0, fpsT = performance.now();
+let triCount = 0;        // rendered triangles, shown next to the fps
+let lastMsgLen = 0;      // size of the most recent WS frame, for the stats line
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  frames++;
+  const now = performance.now();
+  if (now - fpsT >= 1000) {
+    $("fps").textContent = frames + " fps" +
+      (triCount ? " · " + (triCount / 1e6).toFixed(2) + "M tris" : "");
+    frames = 0;
+    fpsT = now;
+  }
+}
+
+// ---- scene building ---------------------------------------------------------
+function clearWorkpiece() {
+  cancelWorkpieceDrag();
+  if (workpieceGroup) {
+    worldGroup.remove(workpieceGroup);
+    // Every geometry/material/texture under the group is created here and is
+    // not shared with the robot, so dispose it all on re-import.
+    workpieceGroup.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
+    workpieceGroup = null;
+    workpieceSolid = null;
+    selectionMarker = null;
+  }
+  edgeMeshes = [];
+  // The server is the source of truth for the pose: forget the local copy
+  // until the next workpiece broadcast arrives.
+  workpiecePose = null;
+  wpMovePending = false;
+  wpPendingFromDrag = false;
+  clearTimeout(wpMoveTimer);
+  $("btn_move_wp").disabled = true;
+  $("wp_drag").disabled = true;
+  $("btn_frame_wp").disabled = true;
+}
+
+function onScene(j) {
+  const t0 = performance.now();
+  // Rebuild robot geometry (called on subscribe and, redundantly, re-import).
+  for (const shapes of linkShapes.values())
+    for (const s of shapes) {
+      worldGroup.remove(s.mesh);
+      s.mesh.geometry.dispose();
+      s.mesh.material.dispose();
+    }
+  linkShapes.clear();
+  triCount = 0;
+
+  for (const link of j.robot || []) {
+    const shapes = [];
+    for (const sh of link.shapes || []) {
+      const geo = buildShapeGeometry(sh);
+      if (!geo) continue;
+      triCount += (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+      const mat = new THREE.MeshStandardMaterial({
+        color: linkColor(link.link), roughness: 0.5, metalness: 0.1
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.matrixAutoUpdate = false;
+      const offset = poseToMatrix4(sh.pos, sh.quat);
+      mesh.matrix.copy(offset);
+      worldGroup.add(mesh);
+      shapes.push({ mesh, offset });
+    }
+    linkShapes.set(link.link, shapes);
+  }
+  log(`机器人场景: ${(triCount / 1e6).toFixed(2)}M 三角形, ` +
+      `消息 ${(lastMsgLen / 1048576).toFixed(1)} MB, 构建 ${(performance.now() - t0).toFixed(0)} ms`);
+}
+
+function onWorkpiece(j) {
+  clearWorkpiece();
+  workpieceGroup = new THREE.Group();
+  worldGroup.add(workpieceGroup);
+
+  const m = j.mesh;
+  if (m && m.data) {
+    const { vertices, indices } = decodeMeshData(m.data, m.vcount, m.tcount);
+    const geo = buildCreasedGeometry(vertices, indices, Math.PI / 6);  // 30 deg crease
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xb8c4d0, roughness: 0.35, metalness: 0.6
+    });
+    const solid = new THREE.Mesh(geo, mat);
+    solid.applyMatrix4(poseToMatrix4(j.pos, j.quat)); // mesh is local-frame
+    workpieceGroup.add(solid);
+    workpieceSolid = solid;
+  }
+
+  for (const e of j.edges || []) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(e.points, 3));
+    const mat = new THREE.LineBasicMaterial({ color: EDGE_DEFAULT });
+    const line = new THREE.Line(geo, mat);
+    line.userData.edgeIndex = e.index;
+    workpieceGroup.add(line);
+    // Keep the world-frame polyline: used for click snapping and the marker.
+    edgeMeshes.push({ mesh: line, index: e.index, points: e.points });
+  }
+  highlightEdge(selectedEdge);
+
+  if (j.pos && j.quat) {
+    // Wire format is arrays ([x,y,z] / [x,y,z,w]); normalize for the inputs.
+    workpiecePose = {
+      position: { x: j.pos[0], y: j.pos[1], z: j.pos[2] },
+      orientation: { x: j.quat[0], y: j.quat[1], z: j.quat[2], w: j.quat[3] }
+    };
+    syncPoseInputs(workpiecePose);
+    setWorkpieceMovePending(false);
+    $("btn_frame_wp").disabled = false;
+  }
+}
+
+// Bring the part into view. The default camera is framed on the robot, and an
+// imported part can sit at the edge of the viewport (or behind the side panel).
+function frameWorkpiece() {
+  if (!workpieceGroup) return;
+  const box = new THREE.Box3().setFromObject(workpieceGroup);
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const dist = Math.max(0.35, Math.max(size.x, size.y, size.z) * 1.4);
+  controls.target.copy(c);
+  camera.position.copy(c).add(new THREE.Vector3(dist * 0.55, dist * 0.7, dist * 0.55));
+  controls.update();
+}
+
+function onRobotState(j) {
+  for (const link of j.links || []) {
+    const shapes = linkShapes.get(link.name);
+    if (!shapes) continue;
+    const linkM = poseToMatrix4(link.pos, link.quat);
+    for (const s of shapes)
+      s.mesh.matrix.copy(linkM).multiply(s.offset);
+  }
+}
+
+// Selected-edge marker (tube + endpoint caps + floating label) is built by
+// buildEdgeMarker in viewer_common.js, shared with the production viewer.
+function highlightEdge(index) {
+  for (const em of edgeMeshes)
+    em.mesh.material.color.set(em.index === index ? EDGE_HIGHLIGHT : EDGE_DEFAULT);
+
+  if (selectionMarker) {
+    workpieceGroup.remove(selectionMarker);
+    selectionMarker.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
+    selectionMarker = null;
+  }
+  if (index < 0 || !workpieceGroup) return;
+
+  const em = edgeMeshes.find((m) => m.index === index);
+  if (!em || !em.points) return;
+
+  selectionMarker = buildEdgeMarker(em.points, "边 #" + index, EDGE_HIGHLIGHT,
+                                    MARKER_RADIUS);
+  if (selectionMarker)
+  {
+    // Green bead at the point where the torch will start, following the
+    // chosen run direction (reverse starts at the far end).
+    const pts = em.points;
+    const n = pts.length;
+    const dirSel = parseInt($("direction").value, 10);
+    const fromEnd = dirSel === 2;
+    const sx = fromEnd ? pts[n - 3] : pts[0];
+    const sy = fromEnd ? pts[n - 2] : pts[1];
+    const sz = fromEnd ? pts[n - 1] : pts[2];
+    const bead = new THREE.Mesh(
+      new THREE.SphereGeometry(0.008, 16, 12),
+      new THREE.MeshStandardMaterial({ color: 0x3ecf8e, emissive: 0x1d7a52, roughness: .35 }));
+    bead.position.set(sx, sy, sz);
+    selectionMarker.add(bead);
+    workpieceGroup.add(selectionMarker);
+  }
+}
+
+function distToPolyline(p, pts) {
+  let best = Infinity;
+  let ax = pts[0], ay = pts[1], az = pts[2];
+  for (let i = 3; i < pts.length; i += 3) {
+    const bx = pts[i], by = pts[i + 1], bz = pts[i + 2];
+    const abx = bx - ax, aby = by - ay, abz = bz - az;
+    const apx = p.x - ax, apy = p.y - ay, apz = p.z - az;
+    const den = abx * abx + aby * aby + abz * abz;
+    let t = den > 1e-12 ? (apx * abx + apy * aby + apz * abz) / den : 0;
+    t = Math.max(0, Math.min(1, t));
+    const dx = apx - t * abx, dy = apy - t * aby, dz = apz - t * abz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 < best) best = d2;
+    ax = bx; ay = by; az = bz;
+  }
+  return Math.sqrt(best);
+}
+
+function nearestEdge(p, maxDist) {
+  let best = null;
+  for (const em of edgeMeshes) {
+    if (!em.points) continue;
+    const d = distToPolyline(p, em.points);
+    if (d <= maxDist && (!best || d < best.dist))
+      best = { index: em.index, dist: d };
+  }
+  return best;
+}
+
+function pick(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  const lineHits = raycaster.intersectObjects(edgeMeshes.map((em) => em.mesh), false);
+  const lineHit = lineHits.length ? lineHits[0] : null;
+
+  // Clicking the part surface snaps to the nearest weld edge within 2 cm.
+  // This is far easier to aim at than the 1px lines on a shaded solid.
+  if (workpieceSolid) {
+    const solidHits = raycaster.intersectObject(workpieceSolid, false);
+    if (solidHits.length) {
+      const p = worldGroup.worldToLocal(solidHits[0].point.clone());
+      const near = nearestEdge(p, PICK_SNAP);
+      if (near) {
+        selectEdge(near.index);
+        return;
+      }
+      // The ray hit the part but no seam is within reach. Do not fall through
+      // to the line test: an occluded edge behind the part can project close
+      // to the click and would be selected by mistake.
+      log("点击处 2 cm 内没有焊缝，请靠近焊缝或直接点击焊缝", "");
+      return;
+    }
+  }
+  if (lineHit)
+    selectEdge(lineHit.object.userData.edgeIndex);
+}
+
+// ---- workpiece pose editing -------------------------------------------------
+// World pose from the x/y/z + RPY inputs. The same Euler convention is used by
+// import and by the move button, so the two stay interchangeable.
+function poseFromInputs() {
+  const position = {
+    x: Number($("wp_x").value) || 0,
+    y: Number($("wp_y").value) || 0,
+    z: Number($("wp_z").value) || 0
+  };
+  const r = THREE.MathUtils.degToRad(Number($("wp_roll").value) || 0);
+  const p = THREE.MathUtils.degToRad(Number($("wp_pitch").value) || 0);
+  const y = THREE.MathUtils.degToRad(Number($("wp_yaw").value) || 0);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(r, p, y, "XYZ"));
+  return { position, orientation: { x: q.x, y: q.y, z: q.z, w: q.w } };
+}
+
+function syncPoseInputs(pose) {
+  const p = pose.position, o = pose.orientation;
+  $("wp_x").value = Number(p.x).toFixed(4);
+  $("wp_y").value = Number(p.y).toFixed(4);
+  $("wp_z").value = Number(p.z).toFixed(4);
+  const e = new THREE.Euler().setFromQuaternion(
+    new THREE.Quaternion(o.x, o.y, o.z, o.w), "XYZ");
+  $("wp_roll").value = THREE.MathUtils.radToDeg(e.x).toFixed(2);
+  $("wp_pitch").value = THREE.MathUtils.radToDeg(e.y).toFixed(2);
+  $("wp_yaw").value = THREE.MathUtils.radToDeg(e.z).toFixed(2);
+}
+
+function setWorkpieceMovePending(on) {
+  wpMovePending = on;
+  const ready = !!workpiecePose;
+  $("btn_move_wp").disabled = !ready || on;
+  $("wp_drag").disabled = !ready || on;
+  renderer.domElement.style.cursor = on ? "progress"
+    : ($("wp_drag").checked ? "grab" : "");
+}
+
+function revertWorkpiecePreview(syncInputs) {
+  if (workpieceGroup) workpieceGroup.position.set(0, 0, 0);
+  if (syncInputs && workpiecePose) syncPoseInputs(workpiecePose);
+}
+
+// One move at a time: the server confirms with a workpiece broadcast, so a
+// second request would otherwise be composed from a stale pose.
+function beginWorkpieceMove(pose, fromDrag) {
+  wpPendingFromDrag = !!fromDrag;
+  setWorkpieceMovePending(true);
+  send({ type: "set_workpiece_pose", pose });
+  log(fromDrag ? "拖动工件，正在应用…" : "正在应用工件位姿…");
+  clearTimeout(wpMoveTimer);
+  wpMoveTimer = setTimeout(() => {
+    if (!wpMovePending) return;
+    setWorkpieceMovePending(false);
+    if (wpPendingFromDrag) revertWorkpiecePreview(true);
+    log("工件移动超时：服务器未确认", "err");
+  }, 5000);
+}
+
+// Drag the part on a horizontal plane through the point under the cursor.
+// worldGroup maps ROS (x,y,z) -> three (x,z,-y), so a scene-plane offset
+// (dx, dz) is (dx, -dz) in the ROS frame the pose inputs use.
+function dragPlanePoint(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hit = new THREE.Vector3();
+  return raycaster.ray.intersectPlane(wpDrag.plane, hit) ? hit : null;
+}
+
+function startWorkpieceDrag(e) {
+  if (!workpieceSolid || !workpiecePose || wpMovePending) return false;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObject(workpieceSolid, false)[0];
+  if (!hit) return false;
+
+  wpDrag = {
+    plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.point.y),
+    start: hit.point.clone(),
+    origin: workpieceGroup.position.clone(),
+    pointerId: e.pointerId
+  };
+  controls.enabled = false;
+  renderer.domElement.style.cursor = "grabbing";
+  renderer.domElement.setPointerCapture(e.pointerId);
+  return true;
+}
+
+function moveWorkpieceDrag(e) {
+  if (!wpDrag || e.pointerId !== wpDrag.pointerId) return;
+  const p = dragPlanePoint(e);
+  if (!p) return;
+  const dx = p.x - wpDrag.start.x;
+  const dz = p.z - wpDrag.start.z;
+  // workpieceGroup is a child of worldGroup, so its position is in ROS axes:
+  // a scene-plane (dx, dz) delta becomes ROS (dx, -dz).
+  workpieceGroup.position.set(wpDrag.origin.x + dx, wpDrag.origin.y - dz,
+                               wpDrag.origin.z);
+}
+
+function endWorkpieceDrag(e) {
+  if (!wpDrag || e.pointerId !== wpDrag.pointerId) return;
+  const drag = wpDrag;
+  wpDrag = null;
+  controls.enabled = true;
+  renderer.domElement.style.cursor = $("wp_drag").checked ? "grab" : "";
+  if (renderer.domElement.hasPointerCapture(e.pointerId))
+    renderer.domElement.releasePointerCapture(e.pointerId);
+
+  const offset = workpieceGroup.position.clone().sub(drag.origin);
+  if (offset.lengthSq() <= 4e-6) {  // < 2 mm: treat as a click, not a drag
+    workpieceGroup.position.copy(drag.origin);
+    return;
+  }
+  wpDragJustEnded = true;
+
+  const pose = {
+    position: {
+      x: workpiecePose.position.x + offset.x,
+      y: workpiecePose.position.y + offset.y,
+      z: workpiecePose.position.z + offset.z
+    },
+    orientation: Object.assign({}, workpiecePose.orientation)
+  };
+  syncPoseInputs(pose);  // show the dragged values while the server confirms
+  beginWorkpieceMove(pose, true);
+}
+
+function cancelWorkpieceDrag() {
+  if (!wpDrag) return;
+  const drag = wpDrag;
+  wpDrag = null;
+  controls.enabled = true;
+  renderer.domElement.style.cursor = $("wp_drag").checked ? "grab" : "";
+  if (renderer.domElement.hasPointerCapture(drag.pointerId))
+    renderer.domElement.releasePointerCapture(drag.pointerId);
+  if (workpieceGroup) workpieceGroup.position.copy(drag.origin);
+}
+
+function cancelWorkpieceDragEvent(e) {
+  if (!wpDrag || e.pointerId !== wpDrag.pointerId) return;
+  cancelWorkpieceDrag();
+}
+
+// ---- connection / messages ---------------------------------------------------
+function connect() {
+  const proto = location.protocol === "https:" ? "wss://" : "ws://";
+  ws = new WebSocket(proto + location.host + "/");
+  ws.onopen = () => {
+    setConnected(true);
+    log("已连接", "ok");
+    // broadcastScene() pushes the robot scene and the current workpiece (if
+    // any), so a reload shows both without an extra workpiece subscription.
+    send({ type: "subscribe_scene" });
+    send({ type: "get_state" });
+  };
+  ws.onclose = () => { setConnected(false); log("连接断开，重连中…", "err"); setTimeout(connect, 2000); };
+  ws.onerror = () => {};
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== "string") return;
+    lastMsgLen = ev.data.length;
+    onJson(JSON.parse(ev.data));
+  };
+}
+
+function renderEdges(edges) {
+  currentEdges = edges || [];
+  renderEdgePicker();
+}
+
+// Edge list is only shown while building a seam: checkbox per edge.
+function renderEdgePicker() {
+  const ul = $("edges");
+  if (!ul) return;
+  ul.innerHTML = "";
+  if (!currentEdges.length) {
+    ul.innerHTML = '<li style="cursor:default">（无可用边）</li>';
+    $("pick_count").textContent = "0 条";
+    return;
+  }
+  currentEdges.forEach((e) => {
+    const li = document.createElement("li");
+    const on = pickedEdges.has(e.index);
+    li.innerHTML =
+      `<label style="display:flex;align-items:center;gap:8px;cursor:pointer">` +
+      `<input class="chk" type="checkbox" ${on ? "checked" : ""}/>` +
+      `<span>边 #${e.index}</span></label>` +
+      `<span class="len">${e.length.toFixed(3)} m${e.closed ? " · 闭合" : ""}</span>`;
+    li.querySelector("input").onchange = (ev) => {
+      if (ev.target.checked) pickedEdges.add(e.index);
+      else pickedEdges.delete(e.index);
+      updatePickCount();
+    };
+    ul.appendChild(li);
+  });
+  updatePickCount();
+}
+
+function updatePickCount() {
+  const n = pickedEdges.size;
+  $("pick_count").textContent = n + " 条";
+  $("btn_pick_ok").disabled = n === 0;
+}
+
+function openPicker() {
+  pickingEdges = true;
+  pickedEdges.clear();
+  $("edge_picker").classList.add("open");
+  $("btn_new_seam").disabled = true;
+  renderEdgePicker();
+}
+
+function closePicker() {
+  pickingEdges = false;
+  $("edge_picker").classList.remove("open");
+  $("btn_new_seam").disabled = false;
+}
+
+// Seam list ---------------------------------------------------------------
+function renderSeams() {
+  const ul = $("seams");
+  ul.innerHTML = "";
+  if (!seams.length) {
+    ul.innerHTML = '<li style="cursor:default">（尚未创建焊缝）</li>';
+    return;
+  }
+  seams.forEach((sm) => {
+    const li = document.createElement("li");
+    if (selectedSeamIds.has(sm.id) || sm.id === selectedSeam) li.className = "sel";
+    const segs = sm.parts ? sm.parts.length : 0;
+    const mark = sm.last_result === "ok" ? '<span class="run-mark ok" title="已执行">✔</span>'
+               : sm.last_result === "failed" ? '<span class="run-mark err" title="上次执行失败">✕</span>'
+               : "";
+    li.innerHTML =
+      `<span>${mark}${sm.name}</span>` +
+      `<span class="meta">${sm.length.toFixed(3)} m · ${segs} 段${sm.closed ? " · 闭合" : ""}</span>` +
+      `<span class="acts"><button title="重命名">✎</button><button title="删除">×</button></span>`;
+    li.draggable = true;
+    li.dataset.id = sm.id;
+    li.ondragstart = (ev) => {
+      dragSeamId = sm.id;
+      ev.dataTransfer.effectAllowed = "move";
+      try { ev.dataTransfer.setData("text/plain", String(sm.id)); } catch (e) {}
+    };
+    li.ondragover = (ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; };
+    li.ondrop = (ev) => {
+      ev.preventDefault();
+      if (dragSeamId == null || dragSeamId === sm.id) return;
+      const ids = seams.map((x) => x.id);
+      const from = ids.indexOf(dragSeamId);
+      const to = ids.indexOf(sm.id);
+      const order = ids.filter((id) => id !== dragSeamId);
+      // Dropping downward lands *after* the target, upward *before* it.
+      const insertAt = order.indexOf(sm.id) + (from < to ? 1 : 0);
+      order.splice(insertAt, 0, dragSeamId);
+      dragSeamId = null;
+      send({ type: "reorder_seams", order });
+    };
+    li.onclick = (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+        if (selectedSeamIds.has(sm.id)) selectedSeamIds.delete(sm.id);
+        else selectedSeamIds.add(sm.id);
+        selectedSeam = sm.id;
+      } else {
+        selectedSeamIds.clear();
+        selectedSeamIds.add(sm.id);
+        selectedSeam = sm.id;
+      }
+      renderSeams();
+      $("btn_run_seams").disabled = selectedSeamIds.size === 0;
+      updateRunLabel();
+    };
+    const [renameBtn, delBtn] = li.querySelectorAll(".acts button");
+    renameBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      const name = prompt("焊缝名称", sm.name);
+      if (name) send({ type: "rename_seam", id: sm.id, name });
+    };
+    delBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      send({ type: "delete_seam", id: sm.id });
+    };
+    ul.appendChild(li);
+  });
+}
+
+function selectSeam(id) {
+  selectedSeam = id;
+  selectedSeamIds.clear();
+  selectedSeamIds.add(id);
+  selectedEdge = -1;
+  send({ type: "select_seam", id });
+  renderSeams();
+  renderEdges(currentEdges);
+  const sm = seams.find((s) => s.id === id);
+  highlightSeam(sm);
+  $("btn_follow").disabled = !sm;
+}
+
+// Draw the seam polyline as a bright tube (separate from the edge marker).
+let seamMarker = null;
+function highlightSeam(sm) {
+  if (seamMarker) {
+    workpieceGroup.remove(seamMarker);
+    seamMarker.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    seamMarker = null;
+  }
+  if (!sm || !sm.polyline || sm.polyline.length < 6 || !workpieceGroup) return;
+  const flat = [];
+  for (const p of sm.polyline) flat.push(p[0], p[1], p[2]);
+  seamMarker = buildEdgeMarker(flat, sm.name, 0x35b6ff, 0.0035);
+  if (seamMarker) workpieceGroup.add(seamMarker);
+}
+
+function selectEdge(i) {
+  if (pickingEdges) {
+    if (pickedEdges.has(i)) pickedEdges.delete(i);
+    else pickedEdges.add(i);
+    renderEdgePicker();
+    return;
+  }
+  selectedEdge = i;
+  selectedSeam = -1;
+  send({ type: "select_edge", edge_index: i });
+  renderSeams();
+  renderEdges(currentEdges);
+  highlightEdge(i);
+  $("btn_follow").disabled = false;
+}
+
+function onJson(j) {
+  switch (j.type) {
+    case "state":
+      selectedEdge = j.selected_edge;
+      if (typeof j.selected_seam === "number") selectedSeam = j.selected_seam;
+      renderEdges(j.edges);
+      $("speed").value = j.speed_scale;
+      $("speed_val").textContent = Number(j.speed_scale).toFixed(2);
+      $("planner").value = j.planner;
+      $("btn_follow").disabled = (selectedEdge < 0);
+      if (j.file_path) $("file_path").value = j.file_path;
+      highlightEdge(selectedEdge);
+      break;
+    case "edges":
+      renderEdges(j.edges);
+      break;
+    case "seams":
+      seams = j.seams || [];
+      if (!seams.some((s) => s.id === selectedSeam)) selectedSeam = -1;
+      renderSeams();
+      $("btn_run_seams").disabled = selectedSeamIds.size === 0;
+      updateRunLabel();
+      if (selectedSeam >= 0) highlightSeam(seams.find((s) => s.id === selectedSeam));
+      else if (seamMarker) { workpieceGroup.remove(seamMarker); seamMarker = null; }
+      $("btn_follow").disabled = selectedSeam < 0 && selectedEdge < 0;
+      break;
+    case "scene":
+      onScene(j);
+      break;
+    case "workpiece":
+      onWorkpiece(j);
+      $("btn_new_seam").disabled = false;
+      break;
+    case "robot_state":
+      onRobotState(j);
+      break;
+    case "status":
+      log(j.message, j.ok ? "ok" : "err");
+      if (!j.ok && wpMovePending &&
+          /move workpiece|set_workpiece_pose|import/.test(j.message || "")) {
+        clearTimeout(wpMoveTimer);
+        const fromDrag = wpPendingFromDrag;
+        wpPendingFromDrag = false;
+        setWorkpieceMovePending(false);
+        if (fromDrag) revertWorkpiecePreview(true);
+      }
+      break;
+    case "follow_feedback":
+      $("progress_fill").style.width = (j.progress * 100) + "%";
+      $("phase").textContent = j.phase + "  " + (j.progress * 100).toFixed(0) + "%";
+      break;
+    case "seams_feedback":
+      $("progress_fill").style.width = (j.progress * 100) + "%";
+      $("phase").textContent =
+        `焊缝 ${j.seam_index + 1}/${j.seam_count} · ${j.phase} ${(j.progress * 100).toFixed(0)}%`;
+      break;
+    case "seams_result": {
+      $("progress_fill").style.width = j.success ? "100%" : "0";
+      const failTxt = j.failed ? `，跳过 ${j.failed} 条` : "";
+      $("phase").textContent = (j.success ? "批量完成" : "批量失败") + failTxt;
+      log(`批量执行: 完成 ${j.executed}，跳过 ${j.failed}${failTxt}`, j.failed ? "err" : "ok");
+      if (j.failed_messages && j.failed_messages.length)
+        j.failed_messages.forEach((m) => log("  跳过原因: " + m, "err"));
+      $("btn_run_seams").disabled = selectedSeamIds.size === 0;
+      break;
+    }
+    case "follow_result": {
+      $("progress_fill").style.width = j.success ? "100%" : "0";
+      const dir = j.direction_used === 0 ? "正向" : j.direction_used === 1 ? "反向" : "";
+      const dirTxt = dir ? " · " + dir : "";
+      $("phase").textContent = (j.success ? "完成" : "失败: " + j.message) + dirTxt;
+      log("跟随" + (j.success ? "完成" : "失败: " + j.message) + dirTxt, j.success ? "ok" : "err");
+      if (typeof j.cartesian_fraction === "number")
+        $("phase").title = "cartesian_fraction = " + j.cartesian_fraction.toFixed(3);
+      break;
+    }
+    default:
+      log("未知消息: " + JSON.stringify(j));
+  }
+}
+
+// ---- controls ----------------------------------------------------------------
+$("btn_import").onclick = () => {
+  const p = $("file_path").value.trim();
+  if (!p) { log("请输入工件路径", "err"); return; }
+  // Lock move/drag until the import broadcast arrives: a move sent with the
+  // previous model_id while the planning node swaps workpieces is rejected.
+  wpPendingFromDrag = false;
+  setWorkpieceMovePending(true);
+  send({ type: "import", file_path: p, pose: poseFromInputs() });
+  clearTimeout(wpMoveTimer);
+  wpMoveTimer = setTimeout(() => {
+    if (!wpMovePending) return;
+    setWorkpieceMovePending(false);
+    log("导入超时：服务器未确认", "err");
+  }, 30000);
+};
+
+$("btn_move_wp").onclick = () => {
+  if (!workpiecePose) { log("请先导入工件", "err"); return; }
+  beginWorkpieceMove(poseFromInputs(), false);
+};
+
+$("btn_frame_wp").onclick = frameWorkpiece;
+
+$("wp_drag").onchange = () => {
+  if (!$("wp_drag").checked) cancelWorkpieceDrag();
+  renderer.domElement.style.cursor =
+    ($("wp_drag").checked && !wpMovePending) ? "grab" : "";
+};
+
+$("btn_follow").onclick = () => {
+  const sm = seams.find((s) => s.id === selectedSeam);
+  if (!sm && selectedEdge < 0) return;
+  const payload = {
+    type: "follow",
+    orientation_mode: parseInt($("orientation_mode").value, 10),
+    direction: parseInt($("direction").value, 10),
+    tangent_tilt: parseFloat($("tangent_tilt").value) || 0,
+    tool_offset: parseFloat($("tool_offset").value) || 0,
+    approach_distance: parseFloat($("approach").value) || 0.08,
+    max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
+  };
+  if (sm) payload.edge_indices = sm.parts.map((p) => p.edge_index);
+  else payload.edge_index = selectedEdge;
+  send(payload);
+};
+
+$("direction").onchange = () => highlightEdge(selectedEdge);  // 起焊点绿点跟着方向走
+$("btn_new_seam").onclick = () => openPicker();
+$("btn_pick_cancel").onclick = () => closePicker();
+$("btn_pick_ok").onclick = () => {
+  const idx = Array.from(pickedEdges).sort((a, b) => a - b);
+  if (!idx.length) return;
+  send({ type: "create_seam", edge_indices: idx });
+  closePicker();
+};
+function updateRunLabel() {
+  const n = selectedSeamIds.size;
+  $("btn_run_seams").textContent = n > 1 ? `▶ 执行 ${n} 条` : "▶ 执行";
+}
+
+$("btn_run_seams").onclick = () => {
+  const ids = Array.from(selectedSeamIds);
+  if (!ids.length) return;
+  send({
+    type: "follow_seams",
+    ids,
+    orientation_mode: parseInt($("orientation_mode").value, 10),
+    direction: parseInt($("direction").value, 10),
+    tangent_tilt: parseFloat($("tangent_tilt").value) || 0,
+    tool_offset: parseFloat($("tool_offset").value) || 0,
+    approach_distance: parseFloat($("approach").value) || 0.08,
+    max_waypoint_spacing: parseFloat($("spacing").value) || 0.005,
+  });
+  $("btn_run_seams").disabled = true;
+};
+
+$("btn_stop").onclick = () => send({ type: "stop" });
+$("btn_home").onclick = () => send({ type: "go_home" });
+$("btn_move").onclick = () => {
+  const x = parseFloat($("mv_x").value), y = parseFloat($("mv_y").value), z = parseFloat($("mv_z").value);
+  if (isNaN(x) || isNaN(y) || isNaN(z)) { log("请输入 x/y/z", "err"); return; }
+  send({ type: "move_to_pose", pose: { position: { x, y, z }, orientation: { x: 0, y: 0, z: 0, w: 1 } } });
+};
+$("btn_jog_plus").onclick = () => jog(+1);
+$("btn_jog_minus").onclick = () => jog(-1);
+function jog(sign) {
+  const d = (parseFloat($("jog_delta").value) || 0.1) * sign;
+  send({ type: "jog_joint", joint_name: $("jog_joint").value, delta: d });
+}
+$("speed").oninput = () => {
+  $("speed_val").textContent = Number($("speed").value).toFixed(2);
+  send({ type: "set_speed", scale: parseFloat($("speed").value) });
+};
+$("planner").onchange = () => send({ type: "set_planner", planner_type: $("planner").value });
+
+initViewer();
+connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rosim_viewer</name>
+  <version>0.1.0</version>
+  <description>Qt5 + VTK 3D GUI for rosim: STEP workpiece import, robot FK display,
+    edge picking, edge-following planning with live animation.</description>
+  <maintainer email="xz@todo.todo">xz</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>ament_index_cpp</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>rosim_interfaces</depend>
+  <depend>rosim_core</depend>
+  <depend>moveit_core</depend>
+  <depend>moveit_ros_planning</depend>
+  <depend>moveit_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>tf2_eigen</depend>
+  <depend>libboost-dev</depend>
+  <depend>eigen3-cmake-module</depend>
+
+  <!-- system libs via CMake: Qt5 (qtbase5-dev), VTK 9 (libvtk9-dev, GUISupportQt) -->
+
+  <exec_depend>rosim_planning</exec_depend>
+  <exec_depend>rosim_description</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

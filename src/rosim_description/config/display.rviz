@@ -1,0 +1,57 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Value: true
+    - Class: rviz_default_plugins/RobotModel
+      Description Source: Parameter
+      Description Parameter: robot_description
+      Name: RobotModel
+      Enabled: true
+      TF Prefix: ""
+      Value: true
+    - Class: rviz_default_plugins/PlanningScene
+      Name: PlanningScene
+      Robot Description: robot_description
+      Robot Description Semantic: robot_description_semantic
+      Topic:
+        Value: /monitored_planning_scene
+      Enabled: true
+    - Class: rviz_default_plugins/Trajectory
+      Name: PlannedPath
+      Topic:
+        Value: /display_planned_path
+      Enabled: true
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Frame Timeout: 15
+      Value: false
+  Global Options:
+    Background Color: 38; 38; 42
+    Fixed Frame: world
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 2.8
+      Focal Point:
+        X: 0.55
+        Y: 0
+        Z: 0.6
+      Name: Current View
+      Pitch: 0.35
+      Yaw: 0.9
+Window Geometry:
+  Height: 900
+  Width: 1200

@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""Edge-following regression harness.
+
+Imports a workpiece, runs FollowEdge on a set of edges (optionally returning to
+home between edges so every run starts from the same state), and records the
+outcome of each edge: success, error code, cartesian fraction, wall time.
+
+The point is *diffing*: keep a baseline JSON, and after any change to the
+planner re-run and compare, so a silent quality regression (an edge that used to
+be traversable now truncating) shows up as a table row instead of a surprise in
+the field.
+
+Usage
+-----
+  # record a baseline over all edges of the sample workpiece
+  ros2 run rosim_planning edge_regress -- \
+      --step ~/rosim_ws/src/rosim_description/meshes/workpiece_sample.step \
+      --out ~/rosim_ws/.scratch/regress/baseline.json
+
+  # a quick subset while iterating
+  ros2 run rosim_planning edge_regress -- --edges 4,17,22 --out /tmp/subset.json
+
+  # compare a fresh run against the baseline
+  ros2 run rosim_planning edge_regress -- --out /tmp/new.json \
+      --compare ~/rosim_ws/.scratch/regress/baseline.json
+
+Notes
+-----
+* ``--home-between`` (default on) makes runs order-independent: a truncated
+  edge changes the end state, which would otherwise perturb every later edge.
+* The planning node owns the model; the web UI is not involved, so this works
+  headless with only ``rosim_planning`` + ros2_control running.
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.node import Node
+
+from rosim_interfaces.action import FollowEdge, FollowSeams
+from rosim_interfaces.msg import SeamSpec
+from rosim_interfaces.srv import GoHome, ImportModel
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+class Regression(Node):
+    def __init__(self, args):
+        super().__init__("edge_regress")
+        self.args = args
+        self.import_cli = self.create_client(ImportModel, "/rosim_planning/import_model")
+        self.home_cli = self.create_client(GoHome, "/rosim_planning/go_home")
+        self.follow_ac = ActionClient(self, FollowEdge, "/rosim_planning/follow_edge")
+        self.seams_ac = ActionClient(self, FollowSeams, "/rosim_planning/follow_seams")
+
+    def wait_for_interfaces(self):
+        for name, cli in (("/rosim_planning/import_model", self.import_cli),
+                          ("/rosim_planning/go_home", self.home_cli)):
+            if not cli.wait_for_service(timeout_sec=self.args.timeout_init):
+                raise RuntimeError(f"service not available: {name}")
+        if not self.follow_ac.wait_for_server(timeout_sec=self.args.timeout_init):
+            raise RuntimeError("action server not available: /rosim_planning/follow_edge")
+
+    def import_model(self):
+        req = ImportModel.Request()
+        req.file_path = os.path.expanduser(self.args.step)
+        req.world_pose.position.x = self.args.x
+        req.world_pose.position.y = self.args.y
+        req.world_pose.position.z = self.args.z
+        req.world_pose.orientation.w = 1.0
+        fut = self.import_cli.call_async(req)
+        rclpy.spin_until_future_complete(self, fut, timeout_sec=60.0)
+        res = fut.result()
+        if res is None or not res.success:
+            raise RuntimeError(f"import failed: {getattr(res, 'message', 'no response')}")
+        log(f"imported {res.model_id}: {len(res.edges)} edges")
+        return res
+
+    def go_home(self):
+        fut = self.home_cli.call_async(GoHome.Request())
+        rclpy.spin_until_future_complete(self, fut, timeout_sec=self.args.timeout_home)
+        res = fut.result()
+        return bool(res and res.success), (res.message if res else "no response")
+
+    def follow_seams(self, model_id, specs):
+        """specs: list of edge-index lists; one continuous batch."""
+        goal = FollowSeams.Goal()
+        goal.model_id = model_id
+        goal.orientation_mode = self.args.orientation_mode
+        goal.tangent_tilt = self.args.tangent_tilt
+        goal.tool_offset = self.args.tool_offset
+        goal.approach_distance = self.args.approach
+        goal.max_waypoint_spacing = self.args.spacing
+        for idx in specs:
+            spec = SeamSpec()
+            spec.edge_indices = list(idx)
+            spec.direction = self.args.direction
+            goal.seams.append(spec)
+
+        t0 = time.time()
+        send_fut = self.seams_ac.send_goal_async(goal)
+        rclpy.spin_until_future_complete(self, send_fut, timeout_sec=30.0)
+        gh = send_fut.result()
+        if gh is None or not gh.accepted:
+            return {"ok": False, "secs": time.time() - t0, "executed": 0, "failed": len(specs),
+                    "failed_indices": list(range(len(specs))),
+                    "failed_messages": ["goal rejected"]}
+        res_fut = gh.get_result_async()
+        deadline = time.time() + self.args.timeout_edge * max(1, len(specs))
+        while not res_fut.done() and time.time() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.2)
+        secs = time.time() - t0
+        if not res_fut.done():
+            gh.cancel_goal_async()
+            return {"ok": False, "secs": secs, "executed": 0, "failed": len(specs),
+                    "failed_indices": list(range(len(specs))), "failed_messages": ["timeout"]}
+        r = res_fut.result().result
+        return {"ok": bool(r.success), "secs": secs, "executed": int(r.executed),
+                "failed": int(r.failed), "failed_indices": list(r.failed_indices),
+                "failed_messages": list(r.failed_messages), "message": r.message}
+
+    def follow(self, model_id, edge_index):
+        goal = FollowEdge.Goal()
+        goal.model_id = model_id
+        goal.edge_index = edge_index
+        goal.orientation_mode = self.args.orientation_mode
+        goal.direction = self.args.direction
+        goal.tangent_tilt = self.args.tangent_tilt
+        goal.tool_offset = self.args.tool_offset
+        goal.approach_distance = self.args.approach
+        goal.max_waypoint_spacing = self.args.spacing
+
+        t0 = time.time()
+        send_fut = self.follow_ac.send_goal_async(goal)
+        rclpy.spin_until_future_complete(self, send_fut, timeout_sec=30.0)
+        goal_handle = send_fut.result()
+        if goal_handle is None or not goal_handle.accepted:
+            return {"ok": False, "error_code": -1, "fraction": 0.0,
+                    "secs": time.time() - t0, "message": "goal rejected"}
+
+        res_fut = goal_handle.get_result_async()
+        deadline = time.time() + self.args.timeout_edge
+        while not res_fut.done() and time.time() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.2)
+        secs = time.time() - t0
+        if not res_fut.done():
+            goal_handle.cancel_goal_async()
+            return {"ok": False, "error_code": -2, "fraction": 0.0, "secs": secs,
+                    "message": f"timeout after {self.args.timeout_edge:.0f}s"}
+
+        r = res_fut.result().result
+        return {"ok": bool(r.success), "error_code": int(r.error_code),
+                "fraction": float(r.cartesian_fraction), "secs": secs,
+                "direction": int(r.direction_used), "message": r.message}
+
+
+def load_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+def compare(baseline, current):
+    b = {int(e["index"]): e for e in baseline.get("results", [])}
+    c = {int(e["index"]): e for e in current.get("results", [])}
+    broke, fixed, drifted = [], [], []
+    for idx in sorted(set(b) & set(c)):
+        bo, co = b[idx]["ok"], c[idx]["ok"]
+        if bo and not co:
+            broke.append(idx)
+        elif co and not bo:
+            fixed.append(idx)
+        else:
+            df = abs(c[idx]["fraction"] - b[idx]["fraction"])
+            if df > 0.01:
+                drifted.append((idx, b[idx]["fraction"], c[idx]["fraction"]))
+
+    log("\n=== 对比基线 ===")
+    log(f"基线: {baseline.get('created', '?')}  ({baseline.get('step', '?')})")
+    log(f"本次: {current['created']}")
+    log(f"边数: 基线 {len(b)} / 本次 {len(c)}")
+
+    if broke:
+        log(f"\n[!] 新增失败 ({len(broke)}): " + ", ".join(f"#{i}" for i in broke))
+        for i in broke:
+            log(f"    #{i}: fraction {b[i]['fraction']:.4f} -> {c[i]['fraction']:.4f}  "
+                f"{c[i]['message'][:70]}")
+    if fixed:
+        log(f"\n[+] 修复 ({len(fixed)}): " + ", ".join(f"#{i}" for i in fixed))
+    if drifted:
+        log(f"\n[~] fraction 变化 >0.01 ({len(drifted)}):")
+        for i, bf, cf in drifted:
+            log(f"    #{i}: {bf:.3f} -> {cf:.3f}")
+
+    okb = sum(1 for e in b.values() if e["ok"])
+    okc = sum(1 for e in c.values() if e["ok"])
+    tb = sum(e["secs"] for e in b.values() if e["ok"])
+    tc = sum(e["secs"] for e in c.values() if e["ok"])
+    log(f"\n成功: {okb}/{len(b)} -> {okc}/{len(c)}")
+    if okb and okc:
+        log(f"平均耗时: {tb/okb:.2f}s -> {tc/okc:.2f}s ({(tc/okc)/(tb/okb)*100-100:+.0f}%)")
+    clean = not broke and not drifted
+    log("\n结论: " + ("无退化" if clean else "存在退化，请检查上面的行"))
+    return 0 if clean else 1
+
+
+def main():
+    ap = argparse.ArgumentParser(description="随边跟随回归测试")
+    ap.add_argument("--step", default=os.path.expanduser(
+        "~/rosim_ws/src/rosim_description/meshes/workpiece_sample.step"))
+    ap.add_argument("--x", type=float, default=1.0)
+    ap.add_argument("--y", type=float, default=0.0)
+    ap.add_argument("--z", type=float, default=0.6)
+    ap.add_argument("--edges", default="all", help="'all' 或逗号分隔的边号")
+    ap.add_argument("--seams", default=None,
+                    help="焊缝批量模式：分号分隔多条缝，每条缝用逗号分隔边号，例如 '17;22;1,17'")
+    ap.add_argument("--out", default=None, help="结果 JSON（默认 .scratch/regress/run-<时间>.json）")
+    ap.add_argument("--compare", default=None, help="与基线 JSON 对比")
+    ap.add_argument("--home-between", dest="home_between", action="store_true", default=True)
+    ap.add_argument("--no-home", dest="home_between", action="store_false")
+    ap.add_argument("--orientation-mode", type=int, default=0)
+    ap.add_argument("--direction", type=int, default=0,
+                    help="0=自动（正向优先） 1=强制正向 2=强制反向")
+    ap.add_argument("--tangent-tilt", type=float, default=0.6)
+    ap.add_argument("--tool-offset", type=float, default=0.0)
+    ap.add_argument("--approach", type=float, default=0.08)
+    ap.add_argument("--spacing", type=float, default=0.005)
+    ap.add_argument("--timeout-edge", type=float, default=300.0)
+    ap.add_argument("--timeout-home", type=float, default=180.0)
+    ap.add_argument("--timeout-init", type=float, default=30.0)
+    args = ap.parse_args()
+
+    rclpy.init()
+    node = Regression(args)
+    try:
+        node.wait_for_interfaces()
+        imported = node.import_model()
+
+        if args.seams:
+            specs = [[int(x) for x in part.split(",") if x.strip()]
+                     for part in args.seams.split(";") if part.strip()]
+            log(f"批量焊缝: {len(specs)} 条 -> {specs}")
+            r = node.follow_seams(imported.model_id, specs)
+            log(f"结果: {'OK' if r['ok'] else 'FAIL'} {r['secs']:.1f}s "
+                f"executed={r['executed']} failed={r['failed']}")
+            if r["failed_indices"]:
+                for k, m in zip(r["failed_indices"], r["failed_messages"]):
+                    log(f"  跳过 seams[{k}] {specs[k]}: {m}")
+            out = args.out or os.path.expanduser(
+                time.strftime("~/rosim_ws/.scratch/regress/seams-%Y%m%d-%H%M%S.json"))
+            out = os.path.expanduser(out)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, "w") as f:
+                json.dump({"created": time.strftime("%Y-%m-%d %H:%M:%S"), "specs": specs,
+                           "result": r}, f, indent=1, ensure_ascii=False)
+            log(f"-> {out}")
+            sys.exit(0 if r["ok"] else 1)
+
+        if args.edges == "all":
+            want = [int(e.edge_index) for e in imported.edges]
+        else:
+            want = [int(x) for x in args.edges.split(",") if x.strip()]
+        meta = {int(e.edge_index): e for e in imported.edges}
+
+        log(f"待测 {len(want)} 条边（home-between={args.home_between}）")
+        results = []
+        t_all = time.time()
+        for n, idx in enumerate(want, 1):
+            r = node.follow(imported.model_id, idx)
+            r["index"] = idx
+            if idx in meta:
+                r["length"] = round(float(meta[idx].length), 4)
+                r["closed"] = bool(meta[idx].closed)
+            results.append(r)
+            log(f"[{n:2d}/{len(want)}] edge {idx:2d} {r['length'] if 'length' in r else '?':>6} m  "
+                f"{'OK  ' if r['ok'] else 'FAIL'} {r['secs']:5.1f}s  "
+                f"fraction={r['fraction']:.3f}  dir={r.get('direction', '?')}  "
+                f"{'' if r['ok'] else r['message'][:60]}")
+            if args.home_between:
+                ok, msg = node.go_home()
+                if not ok:
+                    log(f"        (go_home 失败: {msg[:60]} — 继续，但下一条边的起点可能不同)")
+        total = time.time() - t_all
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+    out = args.out or os.path.expanduser(
+        time.strftime("~/rosim_ws/.scratch/regress/run-%Y%m%d-%H%M%S.json"))
+    out = os.path.expanduser(out)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    payload = {
+        "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "step": os.path.abspath(os.path.expanduser(args.step)),
+        "pose": {"x": args.x, "y": args.y, "z": args.z},
+        "params": {"direction": args.direction,
+                   "orientation_mode": args.orientation_mode,
+                   "tangent_tilt": args.tangent_tilt,
+                   "tool_offset": args.tool_offset,
+                   "approach": args.approach, "spacing": args.spacing,
+                   "home_between": args.home_between},
+        "total_secs": round(total, 1),
+        "results": results,
+    }
+    with open(out, "w") as f:
+        json.dump(payload, f, indent=1, ensure_ascii=False)
+    ok = sum(1 for r in results if r["ok"])
+    log(f"\n完成: {ok}/{len(results)} 成功，用时 {total:.0f}s -> {out}")
+
+    if args.compare:
+        sys.exit(compare(load_json(os.path.expanduser(args.compare)), payload))
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

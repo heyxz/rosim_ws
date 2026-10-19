@@ -1,0 +1,28 @@
+# Plan and execute several seams as ONE continuous trajectory.
+#
+# Each seam is merged from its edges, approached from the previous seam's end
+# state (OMPL free-space transfer) and followed without stopping. A seam that
+# cannot be planned is skipped, recorded, and reported in the result — the batch
+# continues with the next one.
+
+string model_id
+rosim_interfaces/SeamSpec[] seams
+
+uint8 orientation_mode
+float64 tangent_tilt
+float64 tool_offset
+float64 approach_distance
+float64 max_waypoint_spacing
+---
+bool success                  # at least one seam was executed
+uint8 executed
+uint8 failed
+uint8[] failed_indices        # indices into the goal's seams array
+string[] failed_messages
+string message
+trajectory_msgs/JointTrajectory trajectory
+---
+float32 progress              # 0..1 across the whole batch
+uint8 seam_index              # seam currently being planned / executed
+uint8 seam_count
+string phase                  # resolving / planning / following / executing / done

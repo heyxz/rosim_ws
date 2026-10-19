@@ -1,0 +1,52 @@
+# Goal: make the robot approach the selected workpiece edge and follow it
+# (welding/polishing style), collision-free, using OMPL for free-space moves.
+string model_id
+uint32 edge_index            # single-edge planning (legacy path)
+
+# Seam planning: when non-empty, these edges are merged (rosim_core::buildSeam)
+# and the merged polyline is planned as one continuous weld. edge_index is then
+# ignored. A one-element list is a valid seam (single edge).
+uint32[] edge_indices
+
+# Run direction along the edge's own parameterization (polyline order).
+# AUTO keeps the historical behaviour: try the stored direction first and only
+# fall back to the reverse one when the forward approach has no solution.
+uint8 DIRECTION_AUTO=0
+uint8 DIRECTION_FORWARD=1     # start at polyline.front()
+uint8 DIRECTION_REVERSE=2     # start at polyline.back()
+uint8 direction
+
+# Tool orientation convention along the edge.
+uint8 ORIENTATION_TANGENT=0       # tool Z = edge tangent (parallel-transport frame)
+uint8 ORIENTATION_FIXED=1         # constant orientation given below
+uint8 ORIENTATION_NORMAL=2        # tool Z = tangent, X = avg adjacent-face normals (V2)
+uint8 orientation_mode
+geometry_msgs/Quaternion fixed_orientation
+float64 tangent_tilt               # TANGENT mode: lift tool Z off the tangent toward
+                                   # the frame up-axis [rad] (welding lead angle, 0 = strict)
+
+float64 tool_offset               # TCP retreat along -tool Z before touching the edge [m]
+float64 approach_distance         # approach/depart segment length [m], default 0.08
+float64 max_waypoint_spacing      # edge sampling spacing [m], default 0.005
+---
+bool success
+uint8 ERROR_NONE=0
+uint8 ERROR_IK=1
+uint8 ERROR_OMPL=2
+uint8 ERROR_CARTESIAN=3
+uint8 ERROR_COLLISION=4
+uint8 ERROR_CANCELED=5
+uint8 ERROR_INVALID=6
+uint8 error_code
+float64 cartesian_fraction
+string message
+trajectory_msgs/JointTrajectory trajectory
+
+# Which direction the plan actually used (NONE on early failures).
+uint8 DIRECTION_FORWARD_USED=0
+uint8 DIRECTION_REVERSE_USED=1
+uint8 DIRECTION_NONE=255
+uint8 direction_used
+---
+float32 progress                  # 0..1
+string phase                      # resolving / planning / following / executing / done

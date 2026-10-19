@@ -1,0 +1,361 @@
+<?xml version="1.0"?>
+<!-- MOTOMAN-GP12 (Yaskawa, 12 kg payload, 1440 mm reach) — real vendor CAD.
+     Meshes: meshes/gp12/*.stl (meters, link-local frames; exported by
+     rosim_core/tools/gp12_prepare from the vendor STEP, mm*1e-3, offset -W[k];
+     re-tessellated at 0.25 mm / 0.15 rad for the WebGL viewer — 1.26M tris).
+     Kinematics: axes / limits / efforts / velocities verbatim from
+     ROS-Industrial motoman_gp12_support gp12_macro.xacro (noetic-devel);
+     joint origins composed from CAD probes (gp12_prepare probe) — the world
+     chain matches ros-i exactly (L@(0.155,0,0.450) U@(0.155,0,1.064)
+     wrist centre R=B=T@(0.795,0,1.264), tool0 flange face x=0.895).
+     Zero pose = vendor CAD pose: lower arm up, flange face at (0.895,0,1.264).
+       rail_base_link -rail_joint(prismatic X)- rail_carriage
+                      -fixed- base_link
+                 -j1(Z)- link1 -j2(Y)- link2 -j3(-Y)- link3
+                 -j4(-X)- link4 -j5(-Y)- link5 -j6(-X)- flange - tool0
+                 - tool_tip (ESAB RM62 36 deg torch, TCP at the wire) -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="rosim_robot">
+
+  <!-- pass no_ros2_control:=true to load the model without hardware block -->
+  <xacro:arg name="no_ros2_control" default="false"/>
+
+  <xacro:macro name="inertial_cyl" params="mass r h *origin">
+    <inertial>
+      <xacro:insert_block name="origin"/>
+      <mass value="${mass}"/>
+      <inertia ixx="${mass*(3*r*r+h*h)/12}" ixy="0" ixz="0"
+               iyy="${mass*(3*r*r+h*h)/12}" iyz="0"
+               izz="${mass*r*r/2}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="inertial_box" params="mass x y z *origin">
+    <inertial>
+      <xacro:insert_block name="origin"/>
+      <mass value="${mass}"/>
+      <inertia ixx="${mass*(y*y+z*z)/12}" ixy="0" ixz="0"
+               iyy="${mass*(x*x+z*z)/12}" iyz="0"
+               izz="${mass*(x*x+y*y)/12}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ==================== 7th axis: linear rail (2.8 m) ====================
+       Site-built linear track for the GP12: a 45-size profile rail lying on a
+       floor plate, with a recirculating-bearing carriage. Dimensions are
+       typical industrial values (profile 100 x 60 mm, carriage 300 x 240 mm,
+       340 x 340 mm mounting plate, 2.8 m rail, +/-1.05 m travel). The
+       carriage top sits 0.16 m above the floor, so the robot base datum is
+       raised to 0.167 m — the base CAD bottom (z = -7 mm) rests on the
+       mounting plate.
+
+       The rail base is the URDF root; the SRDF virtual joint anchors it to
+       "world". rail_joint is the 7th planning DOF (prismatic along X). -->
+  <link name="rail_base_link">
+    <visual>
+      <origin xyz="0 0 0.006" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.36 0.012"/></geometry>
+      <material name="rail_graphite"><color rgba="0.20 0.21 0.23 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0.042" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.10 0.060"/></geometry>
+      <material name="rail_steel"><color rgba="0.36 0.38 0.41 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0.048 0.081" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.030 0.018"/></geometry>
+      <material name="rail_chrome"><color rgba="0.72 0.74 0.77 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.048 0.081" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.030 0.018"/></geometry>
+      <material name="rail_chrome2"><color rgba="0.72 0.74 0.77 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="1.345 0 0.062" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.16 0.10"/></geometry>
+      <material name="rail_stop"><color rgba="0.16 0.17 0.19 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="-1.345 0 0.062" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.16 0.10"/></geometry>
+      <material name="rail_stop2"><color rgba="0.16 0.17 0.19 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.006" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.36 0.012"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0.042" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.10 0.060"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0.048 0.081" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.030 0.018"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 -0.048 0.081" rpy="0 0 0"/>
+      <geometry><box size="2.80 0.030 0.018"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="1.345 0 0.062" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.16 0.10"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-1.345 0 0.062" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.16 0.10"/></geometry>
+    </collision>
+    <!-- no <inertial> on the root link: KDL ignores it and warns loudly -->
+  </link>
+
+  <joint name="rail_joint" type="prismatic">
+    <parent link="rail_base_link"/>
+    <child link="rail_carriage"/>
+    <origin xyz="0 0 0.09" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.05" upper="1.05" effort="3000" velocity="1.2"/>
+    <dynamics damping="8.0" friction="15.0"/>
+  </joint>
+
+  <link name="rail_carriage">
+    <visual>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry><box size="0.30 0.24 0.050"/></geometry>
+      <material name="carriage_blue"><color rgba="0.16 0.30 0.46 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0.060" rpy="0 0 0"/>
+      <geometry><box size="0.34 0.34 0.020"/></geometry>
+      <material name="carriage_plate"><color rgba="0.55 0.57 0.60 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry><box size="0.30 0.24 0.050"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0.060" rpy="0 0 0"/>
+      <geometry><box size="0.34 0.34 0.020"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="24.0" x="0.34" y="0.34" z="0.08">
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- robot base bolted to the carriage mounting plate (base CAD bottom at
+       rail_carriage + 0.07 -> world z = 0.16) -->
+  <joint name="carriage_base_mount" type="fixed">
+    <parent link="rail_carriage"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.077" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== base (CAD solid 1, z -7..175 mm) ==================== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/base_link.stl" scale="1 1 1"/></geometry>
+      <material name="dark_grey"><color rgba="0.25 0.25 0.25 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/base_link.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="43.8" x="0.45" y="0.33" z="0.18">
+      <origin xyz="-0.06 0 0.084" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- ==================== j1 / S axis: base yaw ==================== -->
+  <joint name="j1" type="revolute">
+    <parent link="base_link"/>
+    <child link="link1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.9670" upper="2.9670" effort="926.10" velocity="4.5355"/>
+  </joint>
+
+  <link name="link1">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link1.stl" scale="1 1 1"/></geometry>
+      <material name="rosim_orange"><color rgba="0.95 0.45 0.05 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link1.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="36.8" x="0.50" y="0.40" z="0.41">
+      <origin xyz="0.006 0.004 0.358" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- ==================== j2 / L axis: shoulder pitch ==================== -->
+  <joint name="j2" type="revolute">
+    <parent link="link1"/>
+    <child link="link2"/>
+    <origin xyz="0.155 0 0.450" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5708" upper="2.7052" effort="1029.00" velocity="4.0132"/>
+  </joint>
+
+  <link name="link2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link2.stl" scale="1 1 1"/></geometry>
+      <material name="rosim_orange2"><color rgba="0.95 0.45 0.05 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link2.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="15.5" x="0.22" y="0.16" z="0.79">
+      <origin xyz="-0.017 -0.118 0.300" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- ==================== j3 / U axis: elbow pitch ==================== -->
+  <joint name="j3" type="revolute">
+    <parent link="link2"/>
+    <child link="link3"/>
+    <origin xyz="0 0 0.614" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="-1.4835" upper="2.6179" effort="551.25" velocity="4.5375"/>
+  </joint>
+
+  <link name="link3">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link3.stl" scale="1 1 1"/></geometry>
+      <material name="rosim_orange3"><color rgba="0.95 0.45 0.05 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link3.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="27.6" x="0.35" y="0.35" z="0.40">
+      <origin xyz="0.100 -0.026 0.091" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- ==================== j4 / R axis: upper-arm roll ==================== -->
+  <joint name="j4" type="revolute">
+    <parent link="link3"/>
+    <child link="link4"/>
+    <origin xyz="0.640 0 0.200" rpy="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <limit lower="-3.4906" upper="3.4906" effort="89.96" velocity="8.2007"/>
+  </joint>
+
+  <link name="link4">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link4.stl" scale="1 1 1"/></geometry>
+      <material name="dark_grey2"><color rgba="0.25 0.25 0.25 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link4.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="11.0" x="0.45" y="0.18" z="0.16">
+      <origin xyz="-0.155 0.004 0.002" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- ==================== j5 / B axis: wrist pitch (spherical centre) ==================== -->
+  <joint name="j5" type="revolute">
+    <parent link="link4"/>
+    <child link="link5"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="-2.6179" upper="2.6179" effort="67.03" velocity="8.1992"/>
+  </joint>
+
+  <link name="link5">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link5.stl" scale="1 1 1"/></geometry>
+      <material name="dark_grey3"><color rgba="0.25 0.25 0.25 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/link5.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="2.8" x="0.15" y="0.13" z="0.14">
+      <origin xyz="0.020 0.002 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- ==================== j6 / T axis: flange roll ==================== -->
+  <joint name="j6" type="revolute">
+    <parent link="link5"/>
+    <child link="flange"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <limit lower="-7.9412" upper="7.9412" effort="33.30" velocity="12.2143"/>
+  </joint>
+
+  <link name="flange">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/flange.stl" scale="1 1 1"/></geometry>
+      <material name="silver"><color rgba="0.8 0.8 0.82 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/flange.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="0.5" x="0.006" y="0.062" z="0.062">
+      <origin xyz="0.097 0 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <joint name="flange_tool0" type="fixed">
+    <parent link="flange"/>
+    <child link="tool0"/>
+    <origin xyz="0.100 0 0" rpy="3.1415926 -1.570796 0"/>
+  </joint>
+
+  <!-- tool0: MoveIt chain tip (standard: +Z outward along flange axis). -->
+  <link name="tool0"/>
+
+  <!-- ==================== welding torch: ESAB RM62 36 deg ====================
+       Real robot torch mesh (see meshes/gp12/TORCH_SOURCE.txt), rigid on the
+       flange via tool0. The rear mounting face sits on the flange face; the
+       swan neck bends 36 deg, so tool_tip is rotated and offset to put its
+       origin on the wire TCP with +Z along the wire (the edge follower's
+       convention). TCP = mesh tip + 10 mm wire stick-out, so the collision
+       mesh stops 10 mm short of the seam.
+       The whole torch is clocked 180 deg about the flange axis (yaw pi): the
+       mesh is authored with the nozzle toward +X, which puts the neck on the
+       wrong side of the wrist once mounted. -->
+  <joint name="tool0_tool_tip" type="fixed">
+    <parent link="tool0"/>
+    <child link="tool_tip"/>
+    <origin xyz="-0.081476 0.000022 0.364356" rpy="0 0.6283185 3.1415926"/>
+  </joint>
+
+  <link name="tool_tip">
+    <visual>
+      <!-- mesh frame = tool0 frame: +Z out of the flange, nozzle bent +X.
+           This origin maps the mesh rear face (z=-4 mm) onto the flange face. -->
+      <origin xyz="0.145896 0.000022 -0.339425" rpy="0 -0.6283185 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/torch_rm62.stl" scale="1 1 1"/></geometry>
+      <material name="torch_graphite"><color rgba="0.16 0.17 0.19 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0.145896 0.000022 -0.339425" rpy="0 -0.6283185 0"/>
+      <geometry><mesh filename="package://rosim_description/meshes/gp12/torch_rm62.stl" scale="1 1 1"/></geometry>
+    </collision>
+    <!-- ~1.5 kg torch, COM in the handle a little ahead of the flange -->
+    <xacro:inertial_cyl mass="1.5" r="0.03" h="0.30">
+      <origin xyz="0.077713 0.000022 -0.245579" rpy="0 -0.6283185 0"/>
+    </xacro:inertial_cyl>
+  </link>
+
+  <!-- optional ros2_control block -->
+  <xacro:unless value="$(arg no_ros2_control)">
+    <xacro:include filename="$(find rosim_description)/urdf/robot.ros2_control.xacro"/>
+    <xacro:rosim_ros2_control/>
+  </xacro:unless>
+
+</robot>

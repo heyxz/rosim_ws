@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rosim_core</name>
+  <version>0.1.0</version>
+  <description>Core libraries for rosim: OCC geometry service (STEP import, edge extraction,
+     tessellation) and VTK visualization helpers (workpiece/edge/robot actors).</description>
+  <maintainer email="xz@todo.todo">xz</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>moveit_core</depend>
+  <depend>moveit_msgs</depend>
+  <depend>geometric_shapes</depend>
+  <depend>libboost-dev</depend>
+  <depend>eigen3-cmake-module</depend>
+
+  <!-- system libs resolved in CMake (not ament packages):
+       OpenCASCADE (libocct-*-dev), VTK 9 (libvtk9-dev) -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

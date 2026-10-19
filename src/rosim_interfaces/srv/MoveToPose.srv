@@ -1,0 +1,5 @@
+# Minimal-loop helper: plan a collision-free OMPL motion to a Cartesian pose and execute it.
+geometry_msgs/Pose target_pose    # tool0 target in world/base frame
+---
+bool success
+string message

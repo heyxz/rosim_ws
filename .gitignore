@@ -1,0 +1,17 @@
+# colcon / ROS 2 build artifacts
+build/
+install/
+log/
+
+# local tooling and scratch data (not part of the simulator)
+dsh-bridge/
+.scratch/
+
+# python
+__pycache__/
+*.py[cod]
+
+# editors
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,7 @@
+# Nudge one joint by a small delta. Clamped to joint limits and
+# collision-checked along the interpolated path before execution.
+string joint_name
+float64 delta
+---
+bool success
+string message

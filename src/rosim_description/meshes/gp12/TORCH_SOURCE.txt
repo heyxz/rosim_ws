@@ -1,0 +1,17 @@
+torch_rm62.stl -- ESAB-style RM62 36 deg MIG/MAG robot welding torch
+=====================================================================
+
+Source : https://github.com/MQCIA/yaskawa-cadcam
+         frontend/public/models/torch_esab/rm62_36deg.stl
+License: MIT (see the source repository's LICENSE)
+Upstream note: "Converted from Verbotics Weld 2026 example cell PLY -> STL.
+Units: millimetres. Visual reference only -- not an official ESAB CAD release."
+
+Local processing (rosim_description/meshes/gp12/torch_rm62.stl):
+  - duplicate STL vertices welded (tolerance 1e-3 mm)
+  - units converted mm -> m, binary STL
+  - 44,289 triangles / 20,834 vertices
+
+Torch frame convention (mesh coordinates, metres):
+  +Z = torch handle axis, rear mounting face at z = -0.004, tip at
+       (0.0756, 0.0, 0.3523) with the gas nozzle bent +36.0 deg about Y.

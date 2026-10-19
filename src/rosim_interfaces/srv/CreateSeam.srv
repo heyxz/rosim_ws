@@ -1,0 +1,13 @@
+# Validate a set of endpoint-connected edges and merge them into one seam.
+# The planning node owns the geometry; the server caches the result for display.
+string model_id
+uint32[] edge_indices
+float64 endpoint_tolerance    # 0 -> default 0.5 mm
+
+---
+bool success
+string message
+geometry_msgs/Point[] polyline   # merged, world frame, travel order
+float64 length
+bool closed
+rosim_interfaces/SeamPart[] parts

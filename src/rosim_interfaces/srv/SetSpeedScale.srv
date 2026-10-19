@@ -1,0 +1,5 @@
+# Scale execution velocity/acceleration (applied by TOTG re-parameterization).
+float64 scale                     # 0.05 .. 1.0
+---
+bool success
+string message
