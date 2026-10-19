@@ -681,6 +681,7 @@ void ServerNode::publishTcpPath(const trajectory_msgs::msg::JointTrajectory& tra
   Eigen::Vector3d prev = Eigen::Vector3d::Zero();
   double prev_t = 0.0;
   bool have_prev = false;
+  std::vector<double> prev_q;
   for (const auto& pt : traj.points)
   {
     if (pt.positions.size() != traj.joint_names.size())
@@ -692,9 +693,34 @@ void ServerNode::publishTcpPath(const trajectory_msgs::msg::JointTrajectory& tra
     double v = 0.0;
     if (have_prev && t > prev_t + 1e-6)
       v = (p - prev).norm() / (t - prev_t);
+
+    // The trajectory controller interpolates between waypoints; joining them
+    // with straight segments makes small corner arcs (r ~ 1 mm) collapse into
+    // a visible diagonal. Interpolate the joints in between so the drawn line
+    // follows the commanded motion instead of the chord.
+    if (have_prev && prev_q.size() == pt.positions.size())
+    {
+      const double gap = (p - prev).norm();
+      const int sub = std::min(40, static_cast<int>(std::ceil(gap / 1.5e-3)));
+      for (int k = 1; k < sub; ++k)
+      {
+        const double a = static_cast<double>(k) / sub;
+        std::vector<double> q(prev_q.size());
+        for (std::size_t j = 0; j < q.size(); ++j)
+          q[j] = prev_q[j] + a * (pt.positions[j] - prev_q[j]);
+        st.setVariablePositions(traj.joint_names, q);
+        st.update();
+        const Eigen::Vector3d pi = st.getGlobalLinkTransform("tool_tip").translation();
+        path.push_back({ pi.x(), pi.y(), pi.z(), v });
+      }
+      st.setVariablePositions(traj.joint_names, pt.positions);
+      st.update();
+    }
+
     path.push_back({ p.x(), p.y(), p.z(), v });
     prev = p;
     prev_t = t;
+    prev_q = pt.positions;
     have_prev = true;
   }
   if (path.size() < 2)
