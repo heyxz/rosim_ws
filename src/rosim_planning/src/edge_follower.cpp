@@ -525,7 +525,8 @@ double EdgeFollower::runCartesian(const moveit::core::RobotState& start,
 // Returns the achieved seam speed [m/s] or 0 when it could not be applied.
 double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& rt,
                                             const std::vector<Eigen::Isometry3d>& seam_frames,
-                                            double weld_speed, double dwell)
+                                            double weld_speed, double dwell, double vel_scale,
+                                            double acc_scale)
 {
   if (seam_frames.size() < 2 || rt.size() < 5)
     return 0.0;
@@ -669,17 +670,40 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
   if (guard >= 25)
     return 0.0;
 
-  // Rebuild the timing: approach rest->rest, seam 0->v->0, depart rest->rest.
+  // Approach / depart are not welds: run them time-optimally (TOTG over that
+  // slice of the trajectory, rest to rest). Only if TOTG fails do we fall back
+  // to the conservative trapezoid.
+  auto totgTimes = [&](std::size_t a, std::size_t b) {
+    std::vector<double> ts;
+    if (b <= a)
+      return ts;
+    robot_trajectory::RobotTrajectory sub(model_, rt.getGroup()->getName());
+    for (std::size_t i = a; i <= b; ++i)
+      sub.addSuffixWayPoint(rt.getWayPoint(i), 0.0);
+    trajectory_processing::TimeOptimalTrajectoryGeneration totg;
+    if (!totg.computeTimeStamps(sub, vel_scale, acc_scale))
+      return ts;
+    ts.resize(b - a + 1);
+    for (std::size_t i = 0; i < ts.size(); ++i)
+      ts[i] = sub.getWayPointDurationFromStart(i);
+    return ts;
+  };
+
   std::vector<double> t(rt.size(), 0.0);
   const double L_pre = len[i0];
+  const auto pre = totgTimes(0, static_cast<std::size_t>(i0));
   for (long i = 0; i <= i0; ++i)
-    t[i] = trapTime(len[i], L_pre);
+    t[i] = pre.size() == static_cast<std::size_t>(i0) + 1 ? pre[static_cast<std::size_t>(i)]
+                                                          : trapTime(len[i], L_pre);
   for (long i = i0 + 1; i <= i1; ++i)
     t[i] = t[i0] + seamTimeAt(len[i] - len[i0]);
   const double t_end_seam = t[i1];
   const double L_post = len.back() - len[i1];
+  const auto post = totgTimes(static_cast<std::size_t>(i1), rt.size() - 1);
   for (std::size_t i = static_cast<std::size_t>(i1) + 1; i < rt.size(); ++i)
-    t[i] = t_end_seam + trapTime(len[i] - len[i1], L_post);
+    t[i] = t_end_seam + (post.size() == rt.size() - static_cast<std::size_t>(i1)
+                             ? post[i - static_cast<std::size_t>(i1)]
+                             : trapTime(len[i] - len[i1], L_post));
 
   rt.setWayPointDurationFromPrevious(0, 0.0);
   for (std::size_t i = 1; i < rt.size(); ++i)
@@ -1395,7 +1419,8 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   if (params.seam_constant_speed)
   {
     const double v =
-        applySeamConstantSpeed(*merged, tcp_frames, params.weld_speed, params.seam_dwell);
+        applySeamConstantSpeed(*merged, tcp_frames, params.weld_speed, params.seam_dwell,
+                               params.velocity_scaling, params.acceleration_scaling);
     if (v > 0.0)
       RCLCPP_INFO(LOGGER, "seam constant speed: %.1f mm/s", v * 1000.0);
     else

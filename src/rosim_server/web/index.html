@@ -539,6 +539,7 @@
     <div class="view-tag">3D 工作单元 · 实时</div>
     <div class="view-tools">
       <label for="show_tcp"><input id="show_tcp" type="checkbox" checked /> TCP 轨迹</label>
+      <label for="show_samples"><input id="show_samples" type="checkbox" checked /> 采样点</label>
       <span class="tcp-legend" title="轨迹颜色 = TCP 速度（绿慢 → 红快，按本次 p90 归一化）">
         <i></i>慢<i></i>快
       </span>
@@ -686,6 +687,7 @@ const linkShapes = new Map();   // link name -> [{ mesh, offset: Matrix4 }]
 let edgeMeshes = [];            // [{ mesh: Line, index, points: [x,y,z,...] }]
 let workpieceGroup = null;
 let tcpLine = null, tcpDots = null, tcpStart = null, tcpEnd = null, lastTcpPath = null;
+let samplePoints = null, lastSamples = null;
 let followRunning = false;
 
 // 跟随过程中隐藏焊缝标注（Sprite），避免遮挡 TCP 轨迹
@@ -1479,6 +1481,25 @@ function selectSeam(id) {
 
 // Draw the seam polyline as a bright tube (separate from the edge marker).
 let seamMarker = null;
+// 路径规划采样点（EdgeFrameGenerator 生成的 TCP 路点）
+function renderSamples(flat) {
+  lastSamples = Array.isArray(flat) ? flat : null;
+  if (samplePoints) {
+    worldGroup.remove(samplePoints);
+    samplePoints.geometry.dispose();
+    samplePoints.material.dispose();
+    samplePoints = null;
+  }
+  if (!worldGroup || !lastSamples || lastSamples.length < 3 || !$("show_samples").checked) return;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(lastSamples), 3));
+  samplePoints = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0x9ad0ff, size: 0.004, sizeAttenuation: true,
+    depthTest: false, depthWrite: false, toneMapped: false }));
+  samplePoints.renderOrder = 31;
+  worldGroup.add(samplePoints);
+}
+
 function renderTcpPath(points) {
   lastTcpPath = Array.isArray(points) ? points : null;
   // 消息可能早于 three.js 初始化到达
@@ -1634,6 +1655,9 @@ function onJson(j) {
         if (fromDrag) revertWorkpiecePreview(true);
       }
       break;
+    case "tcp_samples":
+      renderSamples(j.points);
+      break;
     case "tcp_path":
       renderTcpPath(j.points);
       break;
@@ -1714,6 +1738,7 @@ function cornerParams() {
 }
 
 $("show_tcp").onchange = () => renderTcpPath(lastTcpPath);
+$("show_samples").onchange = () => renderSamples(lastSamples);
 $("btn_clear_tcp").onclick = () => send({ type: "clear_tcp_path" });
 
 $("btn_follow").onclick = () => {

@@ -671,6 +671,13 @@ void ServerNode::handleFollow(const nlohmann::json& j)
     j["cartesian_fraction"] = result.result->cartesian_fraction;
     j["direction_used"] = result.result->direction_used;
     broadcastJson(std::move(j));
+    if (!result.result->tcp_samples.empty())
+    {
+      nlohmann::json sj;
+      sj["type"] = "tcp_samples";
+      sj["points"] = result.result->tcp_samples;
+      broadcastJson(std::move(sj));
+    }
     publishTcpPath(result.result->trajectory);
   };
 

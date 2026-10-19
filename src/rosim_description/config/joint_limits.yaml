@@ -1,45 +1,45 @@
+# Joint velocity/acceleration limits used by time parameterization (TOTG/Ruckig).
+# Position/effort limits live in the URDF. MoveIt reads these from
+# robot_description_planning; nesting them elsewhere makes TOTG fall back
+# to 1 rad/s^2 and roughly triples the cycle time.
 /**:
   ros__parameters:
-    # Velocity/acceleration limits used by time parameterization (TOTG).
-    # Position/effort limits live in the URDF.
-
-    default_velocity_scaling_factor: 0.6
-    default_acceleration_scaling_factor: 0.6
-
-    joint_limits:
-      j1:
-        has_velocity_limits: true
-        max_velocity: 4.54
-        has_acceleration_limits: true
-        max_acceleration: 9.0
-      j2:
-        has_velocity_limits: true
-        max_velocity: 4.01
-        has_acceleration_limits: true
-        max_acceleration: 8.0
-      j3:
-        has_velocity_limits: true
-        max_velocity: 4.54
-        has_acceleration_limits: true
-        max_acceleration: 9.0
-      j4:
-        has_velocity_limits: true
-        max_velocity: 8.20
-        has_acceleration_limits: true
-        max_acceleration: 16.0
-      j5:
-        has_velocity_limits: true
-        max_velocity: 8.20
-        has_acceleration_limits: true
-        max_acceleration: 16.0
-      j6:
-        has_velocity_limits: true
-        max_velocity: 12.2
-        has_acceleration_limits: true
-        max_acceleration: 24.0
-      # 7th axis (linear rail): m/s and m/s^2
-      rail_joint:
-        has_velocity_limits: true
-        max_velocity: 1.2
-        has_acceleration_limits: true
-        max_acceleration: 2.0
+    robot_description_planning:
+      default_velocity_scaling_factor: 0.6
+      default_acceleration_scaling_factor: 0.6
+      joint_limits:
+        j1:
+          has_velocity_limits: true
+          max_velocity: 4.54
+          has_acceleration_limits: true
+          max_acceleration: 9.0
+        j2:
+          has_velocity_limits: true
+          max_velocity: 4.01
+          has_acceleration_limits: true
+          max_acceleration: 8.0
+        j3:
+          has_velocity_limits: true
+          max_velocity: 4.54
+          has_acceleration_limits: true
+          max_acceleration: 9.0
+        j4:
+          has_velocity_limits: true
+          max_velocity: 8.2
+          has_acceleration_limits: true
+          max_acceleration: 16.0
+        j5:
+          has_velocity_limits: true
+          max_velocity: 8.2
+          has_acceleration_limits: true
+          max_acceleration: 16.0
+        j6:
+          has_velocity_limits: true
+          max_velocity: 12.2
+          has_acceleration_limits: true
+          max_acceleration: 24.0
+        rail_joint:
+          has_velocity_limits: true
+          max_velocity: 1.2
+          has_acceleration_limits: true
+          max_acceleration: 2.0

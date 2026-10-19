@@ -910,6 +910,8 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
   busy_ = true;
   auto goal = goal_handle->get_goal();
 
+  std::vector<double> planned_samples;  // flat x,y,z of the planned seam samples
+
   auto finish = [&](bool success, uint8_t code, double fraction, const std::string& message,
                     robot_trajectory::RobotTrajectory* trajectory,
                     uint8_t direction_used = FollowEdge::Result::DIRECTION_NONE) {
@@ -924,6 +926,7 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
       moveit_msgs::msg::RobotTrajectory rt_msg;
       trajectory->getRobotTrajectoryMsg(rt_msg);
       result->trajectory = rt_msg.joint_trajectory;
+      result->tcp_samples = planned_samples;
     }
     const bool canceled = goal_handle->is_canceling();
     if (canceled)
@@ -1019,6 +1022,14 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
   };
   EdgeFollowOutcome outcome = follower_->execute(*edge_ptr, params, start, scene_, cancel_,
                                                  publish_feedback, publish_note);
+
+  planned_samples.reserve(outcome.toolpath.size() * 3);
+  for (const auto& f : outcome.toolpath)
+  {
+    planned_samples.push_back(f.translation().x());
+    planned_samples.push_back(f.translation().y());
+    planned_samples.push_back(f.translation().z());
+  }
 
   if (!outcome.success)
     return finish(false, outcome.error_code, outcome.cartesian_fraction, outcome.message, nullptr,

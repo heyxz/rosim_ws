@@ -49,6 +49,7 @@ uint8 ERROR_INVALID=6
 uint8 error_code
 float64 cartesian_fraction
 string message
+float64[] tcp_samples            # flat x,y,z of the planned seam samples
 trajectory_msgs/JointTrajectory trajectory
 
 # Which direction the plan actually used (NONE on early failures).

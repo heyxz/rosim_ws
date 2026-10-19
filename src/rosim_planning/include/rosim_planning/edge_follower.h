@@ -125,7 +125,8 @@ public:
   /// segments. Returns the achieved speed (m/s) or 0 when it could not apply.
   double applySeamConstantSpeed(robot_trajectory::RobotTrajectory& rt,
                                 const std::vector<Eigen::Isometry3d>& seam_frames,
-                                double weld_speed, double dwell);
+                                double weld_speed, double dwell, double vel_scale,
+                                double acc_scale);
 
   EdgeFollowOutcome execute(const rosim::core::EdgeData& edge,
                             const EdgeFollowParams& params,
