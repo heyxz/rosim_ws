@@ -1,0 +1,6 @@
+out_a/
+out_smoke/
+*.log
+__pycache__/
+.evaluate.py
+.cmp.py
