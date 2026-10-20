@@ -307,6 +307,21 @@ void ServerNode::setupClients()
         std::lock_guard<std::mutex> lock(joint_mutex_);
         pending_joint_ = std::move(msg);
       });
+
+  // RL demo path (plan B): draw it with the same TCP-path pipeline the weld
+  // runs use. transient_local so a path published before this node started is
+  // still delivered.
+  rclcpp::QoS rl_qos(rclcpp::KeepLast(1));
+  rl_qos.reliable().transient_local();
+  rl_demo_sub_ = create_subscription<trajectory_msgs::msg::JointTrajectory>(
+      "/rl_demo/joint_trajectory", rl_qos,
+      [this](trajectory_msgs::msg::JointTrajectory::SharedPtr msg) {
+        RCLCPP_INFO(get_logger(), "RL demo path: %zu points", msg->points.size());
+        publishTcpPath(*msg);
+        // Draw it as a finished plan so the viewer colours it by speed instead of
+        // rendering a growing live trace.
+        broadcastTcpPathFinalLocked();
+      });
 }
 
 void ServerNode::setupWebServer()
@@ -336,6 +351,18 @@ void ServerNode::onWsConnect()
 {
   // A fresh browser knows nothing about the current scene — push the snapshot.
   broadcastStateLocked();
+
+  // Also replay the TCP trace: a page opened while a path is already on screen
+  // (weld run in progress, or an RL demo path published before the tab opened)
+  // would otherwise show an empty scene until the next frame arrives.
+  nlohmann::json trace;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (!tcp_path_.empty())
+      trace = tcpPathJsonLocked();
+  }
+  if (!trace.is_null() && !trace.empty())
+    ws_->broadcastText(trace.dump());
 }
 
 void ServerNode::onWsMessage(const std::string& text, std::function<void(bool)> set_binary,

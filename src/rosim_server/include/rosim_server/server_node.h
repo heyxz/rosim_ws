@@ -145,6 +145,9 @@ private:
   moveit::core::RobotModelPtr model_;
   moveit::core::RobotStatePtr display_state_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+  // RL 演示通道（方案 B）：rl_demo_node 发布策略规划的关节路径，直接复用
+  // publishTcpPath 画出来。transient_local 是为了让服务端后启动也能拿到。
+  rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr rl_demo_sub_;
   std::mutex joint_mutex_;
   sensor_msgs::msg::JointState::SharedPtr pending_joint_;
 
