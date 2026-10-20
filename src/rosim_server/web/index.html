@@ -684,6 +684,7 @@
           <option value="ompl">ompl</option>
           <option value="rl">rl</option>
         </select>
+        <button id="plan_demo" title="用当前规划器规划一次到关节目标，并把路径画出来">规划演示</button>
       </div>
     </section>
 
@@ -1791,6 +1792,11 @@ function onJson(j) {
         `焊缝 ${j.seam_index + 1}/${j.seam_count} · ${j.phase} ${(j.progress * 100).toFixed(0)}%`;
       if (j.note) log(j.note, "note");
       break;
+    case "plan_result": {
+      $("phase").textContent = j.success ? "规划成功" : "规划失败";
+      log(j.message || "", j.success ? "ok" : "err");
+      break;
+    }
     case "seams_result": {
       markFollowRunning(false);
       $("progress_fill").style.width = j.success ? "100%" : "0";
@@ -1997,6 +2003,10 @@ $("speed").oninput = () => {
   send({ type: "set_speed", scale: parseFloat($("speed").value) });
 };
 $("planner").onchange = () => send({ type: "set_planner", planner_type: $("planner").value });
+$("plan_demo").onclick = () => {
+  log(`规划演示（${$("planner").value}）…`);
+  send({ type: "plan_demo" });
+};
 
 renderJogRows();
 initViewer();

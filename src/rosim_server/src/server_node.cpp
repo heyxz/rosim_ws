@@ -283,6 +283,7 @@ void ServerNode::setupClients()
   jog_cartesian_client_ = create_client<JogCartesian>("/rosim_planning/jog_cartesian");
   speed_client_ = create_client<SetSpeedScale>("/rosim_planning/set_speed_scale");
   planner_client_ = create_client<SetPlanner>("/rosim_planning/set_planner");
+  plan_joint_client_ = create_client<rosim_interfaces::srv::PlanJoint>("/rosim_planning/plan_joint");
   create_seam_client_ = create_client<CreateSeam>("/rosim_planning/create_seam");
   follow_client_ = rclcpp_action::create_client<FollowEdge>(this, "/rosim_planning/follow_edge");
   follow_seams_client_ =
@@ -468,6 +469,10 @@ void ServerNode::onWsMessage(const std::string& text, std::function<void(bool)> 
     handleJogCartesian(j);
   else if (type == "set_speed")
     handleSetSpeed(j);
+  else if (type == "plan_demo")
+  {
+    handlePlanDemo(j);
+  }
   else if (type == "set_planner")
     handleSetPlanner(j);
   else if (type == "get_state")
@@ -833,6 +838,45 @@ void ServerNode::handleFollow(const nlohmann::json& j)
   }
   broadcastTcpPathLocked();
   follow_client_->async_send_goal(goal, options);
+}
+
+void ServerNode::handlePlanDemo(const nlohmann::json& j)
+{
+  if (!plan_joint_client_->service_is_ready())
+  {
+    sendError("plan_joint service not ready");
+    return;
+  }
+
+  // Goal = current arm joints + the delta from the page (default: a visible move).
+  static const double kDefault[6] = { 0.5, 0.15, 0.0, 0.0, 0.1, 0.0 };
+  std::array<double, 6> arm{};
+  {
+    std::lock_guard<std::mutex> lock(joint_mutex_);
+    std::lock_guard<std::mutex> lock2(state_mutex_);
+    for (int i = 0; i < 6; ++i)
+      arm[i] = display_state_ ? display_state_->getVariablePosition("j" + std::to_string(i + 1))
+                              : 0.0;
+  }
+  const auto d = j.value("delta", std::vector<double>(kDefault, kDefault + 6));
+  auto req = std::make_shared<rosim_interfaces::srv::PlanJoint::Request>();
+  for (int i = 0; i < 6; ++i)
+    req->goal.push_back(arm[i] + (i < static_cast<int>(d.size()) ? d[i] : 0.0));
+
+  plan_joint_client_->async_send_request(
+      req, [this](rclcpp::Client<rosim_interfaces::srv::PlanJoint>::SharedFuture future) {
+        const auto res = future.get();
+        nlohmann::json out;
+        out["type"] = "plan_result";
+        out["success"] = res->success;
+        out["message"] = res->message;
+        broadcastJson(out);   // takes a json value; .dump() here would double-encode
+        if (res->success)
+        {
+          publishTcpPath(res->trajectory);
+          broadcastTcpPathFinalLocked();
+        }
+      });
 }
 
 void ServerNode::publishTcpPath(const trajectory_msgs::msg::JointTrajectory& traj)
