@@ -1,0 +1,8 @@
+# Plan a free-space motion to a joint goal with the active planner.
+# Mainly a test/benchmark entry point (and a future UI hook): it exercises the
+# same MotionPlanner::plan path the weld pipeline uses.
+float64[] goal               # 6 joint positions
+---
+bool success
+string message
+trajectory_msgs/JointTrajectory trajectory

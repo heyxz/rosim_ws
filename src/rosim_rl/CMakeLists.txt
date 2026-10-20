@@ -17,19 +17,22 @@ find_package(moveit_core REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-add_library(rosim_rl SHARED src/rl_planner.cpp)
+add_library(rosim_rl SHARED src/rl_planner.cpp src/rl_remote_planner.cpp)
 set_target_properties(rosim_rl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(rosim_rl PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 ament_target_dependencies(rosim_rl
   rclcpp rosim_planning rosim_interfaces moveit_core moveit_msgs Eigen3)
+# rl_remote_planner.cpp 用到 rosim::planning::regularizeTiming（在
+# rosim_planning_core 里）。这个库是 dlopen 进规划节点的插件，宿主进程已经
+# 加载了 rosim_planning_core，符号在运行期解析，不必静态链接。
 
 if(ROSIM_WITH_TORCH)
   set(Torch_DIR "/opt/libtorch/lib/cmake/Torch")
   find_package(Torch REQUIRED)
   target_compile_definitions(rosim_rl PUBLIC ROSIM_WITH_TORCH=1)
-  target_link_libraries(rosim_rl PRIVATE ${TORCH_LIBRARIES})
+  target_link_libraries(rosim_rl ${TORCH_LIBRARIES})
   message(STATUS "rosim_rl: libtorch enabled")
 else()
   message(STATUS "rosim_rl: libtorch disabled (stub policy); set -DROSIM_WITH_TORCH=ON to enable")

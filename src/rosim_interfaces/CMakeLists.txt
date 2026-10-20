@@ -18,6 +18,8 @@ rosidl_generate_interfaces(
   "srv/MoveWorkpiece.srv"
   "srv/SetSpeedScale.srv"
   "srv/SetPlanner.srv"
+  "srv/RlPlan.srv"
+  "srv/PlanJoint.srv"
   "srv/MoveToPose.srv"
   "srv/GoHome.srv"
   "srv/JogJoint.srv"

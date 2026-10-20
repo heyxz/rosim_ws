@@ -29,6 +29,7 @@
 #include "rosim_interfaces/srv/jog_cartesian.hpp"
 #include "rosim_interfaces/srv/jog_joint.hpp"
 #include "rosim_interfaces/srv/move_to_pose.hpp"
+#include "rosim_interfaces/srv/plan_joint.hpp"
 #include "rosim_interfaces/srv/move_workpiece.hpp"
 #include "rosim_interfaces/srv/set_planner.hpp"
 #include "rosim_interfaces/srv/set_speed_scale.hpp"
@@ -131,6 +132,10 @@ private:
   moveit::core::RobotModelPtr model_;
   planning_scene::PlanningScenePtr scene_;
   MotionPlannerPtr planner_;
+  // 测试/基准入口：用当前激活的规划器规划到关节目标（RL 接入后可直接验证）
+  rclcpp::Service<rosim_interfaces::srv::PlanJoint>::SharedPtr plan_joint_srv_;
+  void handlePlanJoint(const rosim_interfaces::srv::PlanJoint::Request::SharedPtr req,
+                       const rosim_interfaces::srv::PlanJoint::Response::SharedPtr res);
   std::unique_ptr<EdgeFollower> follower_;
   std::string group_ = "manipulator";
   std::string active_planner_ = "ompl";

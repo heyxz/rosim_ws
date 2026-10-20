@@ -206,6 +206,12 @@ void PlanningNode::setupInterfaces()
              const rosim_interfaces::srv::SetPlanner::Response::SharedPtr res) {
         handleSetPlanner(req, res);
       });
+  plan_joint_srv_ = create_service<rosim_interfaces::srv::PlanJoint>(
+      "~/plan_joint",
+      [this](const rosim_interfaces::srv::PlanJoint::Request::SharedPtr req,
+             const rosim_interfaces::srv::PlanJoint::Response::SharedPtr res) {
+        handlePlanJoint(req, res);
+      });
   move_to_pose_srv_ = create_service<rosim_interfaces::srv::MoveToPose>(
       "~/move_to_pose",
       [this](const rosim_interfaces::srv::MoveToPose::Request::SharedPtr req,
@@ -510,6 +516,44 @@ void PlanningNode::handleSetSpeedScale(
   speed_scale_ = req->scale;
   res->success = true;
   res->message = "speed scale = " + std::to_string(speed_scale_);
+}
+
+void PlanningNode::handlePlanJoint(
+    const rosim_interfaces::srv::PlanJoint::Request::SharedPtr req,
+    const rosim_interfaces::srv::PlanJoint::Response::SharedPtr res)
+{
+  using clock = std::chrono::steady_clock;
+  const auto t0 = clock::now();
+  try
+  {
+    PlanRequest preq(*current_state_);
+    preq.goal_joint_positions = req->goal;
+    preq.scene = scene_;               // same scene the weld pipeline plans in
+    preq.group = group_;
+    preq.allowed_planning_time = 5.0;
+    preq.velocity_scaling = speed_scale_;
+    preq.acceleration_scaling = speed_scale_;
+
+    PlanResult result;
+    const bool ok = planner_ && planner_->plan(preq, result) && result.success;
+    const double ms = std::chrono::duration<double, std::milli>(clock::now() - t0).count();
+    res->success = ok;
+    res->message = ok ? (active_planner_ + " ok, " + std::to_string(result.trajectory->size()) +
+                         " points, " + std::to_string(static_cast<int>(ms)) + " ms")
+                      : ("plan failed: " + result.error);
+    if (ok)
+    {
+      moveit_msgs::msg::RobotTrajectory msg;
+      result.trajectory->getRobotTrajectoryMsg(msg);
+      res->trajectory = msg.joint_trajectory;
+    }
+    RCLCPP_INFO(LOGGER, "plan_joint: %s", res->message.c_str());
+  }
+  catch (const std::exception& ex)
+  {
+    res->success = false;
+    res->message = std::string("plan_joint threw: ") + ex.what();
+  }
 }
 
 void PlanningNode::handleSetPlanner(

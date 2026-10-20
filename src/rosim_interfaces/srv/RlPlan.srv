@@ -1,0 +1,10 @@
+# Internal contract between the C++ RlPlanner and the Python policy node.
+# The policy is trained on exactly this observation, so the rollout happens in
+# Python where the training code can be reused verbatim.
+float64[] start              # 6 joint positions
+float64[] goal               # 6 joint positions
+---
+bool success
+string message
+float64[] path               # flattened, 6 per waypoint, starts at `start`
+float64 min_clearance        # metres, against the training obstacle model
