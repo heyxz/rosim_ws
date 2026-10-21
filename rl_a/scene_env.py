@@ -41,6 +41,8 @@ class WorkpieceEnv(PlanEnv):
         data = np.load(bank)
         self._bank_poses = data["poses"]
         self._bank_goals = data["goals"]
+        # 由真实调用日志生成的库会带 starts：直接用真实起点，分布才对
+        self._bank_starts = data["starts"] if "starts" in data else None
 
     # ------------------------------------------------------------------ scene
     def _sample_pose(self):
@@ -57,6 +59,11 @@ class WorkpieceEnv(PlanEnv):
         delta = (self._bank_poses - np.array([*centre, yaw])) / scale
         return self._bank_goals[int(np.argmin((delta ** 2).sum(axis=1)))].copy()
 
+    def _bank_sample(self):
+        """有 starts 的库：随机取一条真实 (start, goal) 对。"""
+        i = int(self.rng.integers(len(self._bank_goals)))
+        return self._bank_starts[i].copy(), self._bank_goals[i].copy()
+
     def approach_pose(self, centre, yaw):
         """接近位姿 (R, t)，随工件平移和旋转。"""
         c, s = np.cos(yaw), np.sin(yaw)
@@ -68,6 +75,14 @@ class WorkpieceEnv(PlanEnv):
         for _ in range(20):
             centre, yaw = self._sample_pose()
             self.obstacles = self.part.spheres(centre, yaw)
+            if self._bank_starts is not None:
+                start, goal = self._bank_sample()
+                self.goal = goal
+                self.q = start
+                self.steps = 0
+                self.prev = float(np.linalg.norm(self.q - self.goal))
+                return self._obs()
+
             goal = self._bank_goal(centre, yaw)
             pts, _ = kin.forward(goal)
             if kin.min_clearance(pts, self.obstacles) < 0.02:
