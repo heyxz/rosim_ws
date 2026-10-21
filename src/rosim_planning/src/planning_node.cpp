@@ -7,6 +7,7 @@
 
 #include <cstdlib>
 
+#include "rosim_planning/fallback_planner.h"
 #include "rosim_planning/trajectory_timing.h"
 
 #include <algorithm>
@@ -541,49 +542,12 @@ void PlanningNode::handlePlanJoint(
     preq.velocity_scaling = speed_scale_;
     preq.acceleration_scaling = speed_scale_;
 
-    // RL 只用于小位移；目标太大时直接 OMPL（见 rl_max_delta_ 的注释）
-    double delta_norm = 0.0;
-    if (active_planner_ != "ompl" && allow_fallback_ && preq.goal_joint_positions.size() >= 6 &&
-        current_state_)
-    {
-      for (size_t i = 0; i < 6; ++i)
-      {
-        const double q0 = current_state_->getVariablePosition("j" + std::to_string(i + 1));
-        const double d = preq.goal_joint_positions[i] - q0;
-        delta_norm += d * d;
-      }
-      delta_norm = std::sqrt(delta_norm);
-    }
-
     PlanResult result;
-    bool ok = false;
+    const bool ok = planner_ && planner_->plan(preq, result) && result.success;
     std::string note;
-    if (delta_norm > rl_max_delta_ && active_planner_ != "ompl")
-    {
-      note = "goal offset " + std::to_string(delta_norm).substr(0, 4) +
-             " rad > rl range, used ompl";
-      if (!fallback_planner_)
-        fallback_planner_ = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
-      ok = fallback_planner_ && fallback_planner_->plan(preq, result) && result.success;
-    }
-    else
-    {
-      ok = planner_ && planner_->plan(preq, result) && result.success;
-    }
-    if (!ok && note.empty() && allow_fallback_ && active_planner_ != "ompl")
-    {
-      // RL 的失败率随目标偏移上升（1.8 rad 时约 60% 失败），直接返回失败会让
-      // 调用方拿到硬错误；这里用 OMPL 兜底，并在消息里写明是回退的结果。
-      note = "rl failed (" + result.error + "), fell back to ompl";
-      PlanResult fb;
-      if (!fallback_planner_)
-        fallback_planner_ = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
-      ok = fallback_planner_ && fallback_planner_->plan(preq, fb) && fb.success;
-      if (ok)
-        result = std::move(fb);   // PlanResult 持有 unique_ptr，只能移动
-      else
-        note = "rl failed (" + result.error + ") and ompl fallback failed (" + fb.error + ")";
-    }
+    if (auto* fb = dynamic_cast<FallbackPlanner*>(planner_.get()))
+      note = fb->lastFallback() ? fb->lastNote() : std::string();
+
     const double ms = std::chrono::duration<double, std::milli>(clock::now() - t0).count();
     res->success = ok;
     res->message = ok ? ((note.empty() ? active_planner_ : note) + ", " +
@@ -612,6 +576,14 @@ void PlanningNode::handleSetPlanner(
   try
   {
     auto next = MotionPlannerFactory::create(req->planner_type, shared_from_this(), model_);
+
+    // 非 OMPL 的规划器（目前是 RL）外面套一层回退装饰器：焊缝跟随的接近/退刀
+    // 段也是直接调 planner_->plan()，规则必须对所有调用方一致。
+    if (req->planner_type != "ompl" && allow_fallback_)
+    {
+      auto fallback = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
+      next = std::make_shared<FallbackPlanner>(next, fallback, rl_max_delta_);
+    }
     planner_ = next;
     follower_ = std::make_unique<EdgeFollower>(shared_from_this(), model_, planner_);
     applyFollowerConfig();  // switching planners must keep the thread budget
