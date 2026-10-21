@@ -145,7 +145,11 @@ void PlanningNode::loadRobotModel()
   current_state_->setToDefaultValues();
   current_state_->setToDefaultValues(model_->getJointModelGroup(group_), "home");
 
-  planner_ = MotionPlannerFactory::create(active_planner_, shared_from_this(), model_);
+  // 默认规划器：auto = 直线（接近/退刀，确定性）→ RL（需要绕障时）→ OMPL（兜底）。
+  // 焊缝段本身就是确定性采样，不经过这里。
+  declare_parameter<std::string>("default_planner", "auto");
+  get_parameter("default_planner", active_planner_);
+  planner_ = makePlanner(active_planner_);
   follower_ = std::make_unique<EdgeFollower>(shared_from_this(), model_, planner_);
   applyFollowerConfig();
 }
@@ -569,34 +573,49 @@ void PlanningNode::handlePlanJoint(
   }
 }
 
+MotionPlannerPtr PlanningNode::makePlanner(const std::string& type)
+{
+  const std::string key = type + (allow_fallback_ ? "+fb" : "");
+  const auto cached = planner_cache_.find(key);
+  if (cached != planner_cache_.end())
+    return cached->second;                      // 复用：不销毁旧实例
+
+  MotionPlannerPtr next;
+  if (type == "auto")
+  {
+    // 三段分工：先试确定性直线（可复现、3 ms 量级），直线走不了（碰撞/IK 分支
+    // 跳变）再让 RL 绕障，仍不行才用 OMPL。RL 的服务节点没起也不会卡住——
+    // RlRemotePlanner 会直接返回失败，链条继续往下走。
+    auto ompl = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
+    auto rl = MotionPlannerFactory::create("rl", shared_from_this(), model_);
+    auto rl_chain = std::make_shared<FallbackPlanner>(rl, ompl, rl_max_delta_, get_logger());
+    next = std::make_shared<FallbackPlanner>(
+        MotionPlannerFactory::create("line", shared_from_this(), model_), rl_chain, 1e9,
+        get_logger());
+  }
+  else
+  {
+    next = MotionPlannerFactory::create(type, shared_from_this(), model_);
+    // 非 OMPL 的规划器外面套回退：焊缝跟随的接近/退刀段也直接调 plan()，
+    // 规则必须对所有调用方一致。
+    if (type != "ompl" && allow_fallback_)
+    {
+      auto fallback = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
+      const double gate = (type == "rl") ? rl_max_delta_ : 1e9;
+      next = std::make_shared<FallbackPlanner>(next, fallback, gate, get_logger());
+    }
+  }
+  planner_cache_[key] = next;
+  return next;
+}
+
 void PlanningNode::handleSetPlanner(
     const rosim_interfaces::srv::SetPlanner::Request::SharedPtr req,
     const rosim_interfaces::srv::SetPlanner::Response::SharedPtr res)
 {
   try
   {
-    const std::string key = req->planner_type + (allow_fallback_ ? "+fb" : "");
-    MotionPlannerPtr next;
-    auto cached = planner_cache_.find(key);
-    if (cached != planner_cache_.end())
-    {
-      next = cached->second;                 // 复用，不重建（也避免销毁旧实例）
-    }
-    else
-    {
-      next = MotionPlannerFactory::create(req->planner_type, shared_from_this(), model_);
-      // 非 OMPL 的规划器（RL / 直线）外面套一层回退装饰器：焊缝跟随的接近/
-      // 退刀段也是直接调 planner_->plan()，规则必须对所有调用方一致。
-      if (req->planner_type != "ompl" && allow_fallback_)
-      {
-        auto fallback = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
-        // 位移门限只对 RL 有意义（策略训练范围有限）；直线规划器能走大位移，
-        // 是否可行由它自己的 IK/碰撞检查决定，所以不设门限。
-        const double gate = (req->planner_type == "rl") ? rl_max_delta_ : 1e9;
-        next = std::make_shared<FallbackPlanner>(next, fallback, gate, get_logger());
-      }
-      planner_cache_[key] = next;
-    }
+    auto next = makePlanner(req->planner_type);
     planner_ = next;
     follower_ = std::make_unique<EdgeFollower>(shared_from_this(), model_, planner_);
     applyFollowerConfig();  // switching planners must keep the thread budget

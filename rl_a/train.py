@@ -54,8 +54,10 @@ class ArmGym(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, seed: int = 0, difficulty: float = 0.0):
-        self.env = ENV_CLS(seed=seed, difficulty=difficulty)
+    def __init__(self, seed: int = 0, difficulty: float = 0.0, bank: str | None = None,
+                 bank_ratio: float = 0.5):
+        self.env = ENV_CLS(seed=seed, difficulty=difficulty, bank_path=bank,
+                           bank_ratio=bank_ratio)
         self.observation_space = spaces.Box(-np.inf, np.inf, (self.env.obs_dim,), np.float32)
         self.action_space = spaces.Box(-1.0, 1.0, (self.env.act_dim,), np.float32)
 
@@ -70,9 +72,11 @@ class ArmGym(gym.Env):
         return obs, float(reward), bool(done), False, info
 
 
-def make_env(rank: int, seed: int, difficulty: float):
+def make_env(rank: int, seed: int, difficulty: float, bank: str | None = None,
+             bank_ratio: float = 0.5):
     def _init():
-        return Monitor(ArmGym(seed=seed + rank, difficulty=difficulty))
+        return Monitor(ArmGym(seed=seed + rank, difficulty=difficulty, bank=bank,
+                              bank_ratio=bank_ratio))
     return _init
 
 
@@ -90,8 +94,10 @@ class Curriculum(BaseCallback):
         self.next_check = every
         self.rows = []
         self._t_prev = None
-        self.eval_env = ENV_CLS(seed=99991, difficulty=0.0)
-        self.hard_env = ENV_CLS(seed=99992, difficulty=1.0)
+        self.eval_env = ENV_CLS(seed=99991, difficulty=0.0, bank_path=None)
+        # 期末评估用满难度 + 真实起点库
+        self.hard_env = ENV_CLS(seed=99992, difficulty=1.0,
+                                bank_path="scene_bank.npz", bank_ratio=1.0)
 
     def _on_step(self) -> bool:
         if self.num_timesteps < self.next_check:
@@ -169,6 +175,10 @@ def main():
     ap.add_argument("--device", default="auto", help="auto / cpu / cuda")
     ap.add_argument("--serial", action="store_true", help="DummyVecEnv instead of subprocesses")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--bank", default="scene_bank.npz",
+                    help="真实起点样本库（start/goal 成对，npz）；传 '' 关闭")
+    ap.add_argument("--bank-ratio", type=float, default=0.5,
+                    help="每个 episode 用样本库起点的概率")
     ap.add_argument("--env", choices=["plan", "scene"], default="plan",
                     help="plan=随机关节目标；scene=工件位姿随机的接近任务")
     args = ap.parse_args()
@@ -179,7 +189,8 @@ def main():
     global ENV_CLS
     ENV_CLS = scene_mod.WorkpieceEnv if args.env == "scene" else env_mod.PlanEnv
     print("env:", ENV_CLS.__name__)
-    fns = [make_env(i, args.seed, 0.0) for i in range(args.envs)]
+    bank = args.bank or None
+    fns = [make_env(i, args.seed, 0.0, bank, args.bank_ratio) for i in range(args.envs)]
     venv = DummyVecEnv(fns) if args.serial else SubprocVecEnv(fns)
     venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=5.0)
 
@@ -196,64 +207,68 @@ def main():
 
     cb = Curriculum(venv, args.out)
     model.learn(total_timesteps=args.timesteps, callback=cb)
+    # 先落盘：后面的评估/导出再出错也不会丢掉模型和归一化统计
     model.save(os.path.join(args.out, "final_model"))
     venv.save(os.path.join(args.out, "vecnormalize.pkl"))
 
-    # ---- evaluate the best checkpoint at full difficulty -------------------
-    best_path = os.path.join(args.out, "best_model")
-    if os.path.exists(best_path + ".zip"):
-        model = PPO.load(best_path, device="cpu")
-        print("using best checkpoint:", best_path)
-    vecnorm = VecNormalize.load(os.path.join(args.out, "vecnormalize.pkl"), venv)
-    vecnorm.training = False
+    try:
+        # ---- evaluate the best checkpoint at full difficulty -------------------
+        best_path = os.path.join(args.out, "best_model")
+        if os.path.exists(best_path + ".zip"):
+            model = PPO.load(best_path, device="cpu")
+            print("using best checkpoint:", best_path)
+        vecnorm = VecNormalize.load(os.path.join(args.out, "vecnormalize.pkl"), venv)
+        vecnorm.training = False
 
-    ev = ENV_CLS(seed=4242, difficulty=1.0)
-    ok = coll = 0
-    best_rec = None
-    for _ in range(40):
-        obs = ev.reset()
-        frames = [{"q": ev.q.tolist(), "tcp": kin.forward(ev.q)[1].tolist()}]
-        done = False
-        while not done:
-            action, _ = model.predict(vecnorm.normalize_obs(obs[None, :])[0], deterministic=True)
-            obs, _, done, info = ev.step(action)
-            frames.append({"q": ev.q.tolist(), "tcp": kin.forward(ev.q)[1].tolist(),
-                           "clearance": info["clearance"]})
-        ok += int(info["reached"])
-        coll += int(info["collided"])
-        if info["reached"]:
-            rec = {"frames": frames, "target": kin.forward(ev.goal)[1].tolist(),
-                   "goal_q": ev.goal.tolist(),
-                   "obstacles": ev.obstacles.tolist(), "steps": len(frames) - 1,
-                   "reached": True, "collided": False}
-            if best_rec is None or len(rec["frames"]) > len(best_rec["frames"]):
-                best_rec = rec
-    print(f"eval (40 episodes, full difficulty): reached {ok/40:.1%}  collision {coll/40:.1%}")
+        ev = ENV_CLS(seed=4242, difficulty=1.0)
+        ok = coll = 0
+        best_rec = None
+        for _ in range(40):
+            obs = ev.reset()
+            frames = [{"q": ev.q.tolist(), "tcp": kin.forward(ev.q)[1].tolist()}]
+            done = False
+            while not done:
+                action, _ = model.predict(vecnorm.normalize_obs(obs[None, :])[0], deterministic=True)
+                obs, _, done, info = ev.step(action)
+                frames.append({"q": ev.q.tolist(), "tcp": kin.forward(ev.q)[1].tolist(),
+                               "clearance": info["clearance"]})
+            ok += int(info["reached"])
+            coll += int(info["collided"])
+            if info["reached"]:
+                rec = {"frames": frames, "target": kin.forward(ev.goal)[1].tolist(),
+                       "goal_q": ev.goal.tolist(),
+                       "obstacles": ev.obstacles.tolist(), "steps": len(frames) - 1,
+                       "reached": True, "collided": False}
+                if best_rec is None or len(rec["frames"]) > len(best_rec["frames"]):
+                    best_rec = rec
+        print(f"eval (40 episodes, full difficulty): reached {ok/40:.1%}  collision {coll/40:.1%}")
 
-    if best_rec is not None:
-        with open(os.path.join(args.out, "rollout.json"), "w") as f:
-            json.dump(best_rec, f)
-        print("wrote", os.path.join(args.out, "rollout.json"))
+        if best_rec is not None:
+            with open(os.path.join(args.out, "rollout.json"), "w") as f:
+                json.dump(best_rec, f)
+            print("wrote", os.path.join(args.out, "rollout.json"))
 
-    # ---- artifacts for the C++ planner -------------------------------------
-    onnx_path = os.path.join(args.out, "policy.onnx")
-    meta = {
-        "obs_dim": int(model.observation_space.shape[0]),
-        "act_dim": int(model.action_space.shape[0]),
-        "max_dq": MAX_DQ,
-        "obs_mean": vecnorm.obs_rms.mean.tolist(),
-        "obs_var": vecnorm.obs_rms.var.tolist(),
-        "clip_obs": 5.0,
-        "eval_success": ok / 40.0,
-    }
-    # policy.json 先写：export_best.py 要用这里的归一化统计去比较 best/final，
-    # 然后重写 policy.json + policy.onnx 成更好的那一版。
-    with open(os.path.join(args.out, "policy.json"), "w") as f:
-        json.dump(meta, f, indent=1)
-    import subprocess
-    subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "export_best.py"),
-                    args.out, "40", args.env], check=False)
-    print("wrote", onnx_path, "and policy.json")
+        # ---- artifacts for the C++ planner -------------------------------------
+        onnx_path = os.path.join(args.out, "policy.onnx")
+        meta = {
+            "obs_dim": int(model.observation_space.shape[0]),
+            "act_dim": int(model.action_space.shape[0]),
+            "max_dq": MAX_DQ,
+            "obs_mean": vecnorm.obs_rms.mean.tolist(),
+            "obs_var": vecnorm.obs_rms.var.tolist(),
+            "clip_obs": 5.0,
+            "eval_success": ok / 40.0,
+        }
+        # policy.json 先写：export_best.py 要用这里的归一化统计去比较 best/final，
+        # 然后重写 policy.json + policy.onnx 成更好的那一版。
+        with open(os.path.join(args.out, "policy.json"), "w") as f:
+            json.dump(meta, f, indent=1)
+        import subprocess
+        subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "export_best.py"),
+                        args.out, "40", args.env], check=False)
+        print("wrote", onnx_path, "and policy.json")
+    except Exception as exc:
+        print("final export skipped:", exc)
 
 
 if __name__ == "__main__":

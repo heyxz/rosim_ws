@@ -29,9 +29,23 @@ SPHERE_RADIUS = 0.05
 
 class PlanEnv:
     def __init__(self, seed: int | None = None, difficulty: float = 1.0,
-                 horizon: int = HORIZON):
+                 horizon: int = HORIZON, bank_path: str | None = None,
+                 bank_ratio: float = 0.5, bank_jitter: float = 0.05):
         self.rng = np.random.default_rng(seed)
         self.horizon = horizon
+        # 真实起点分布：从调用日志建的样本库（start/goal 成对）。
+        # 只用 home±噪声 训练时，策略在真实起点上会 300 步不达（见 GATE-NOTES）。
+        self.bank_ratio = float(bank_ratio)
+        self.bank_jitter = float(bank_jitter)
+        self._bank_starts = None
+        self._bank_goals = None
+        if bank_path:
+            import os
+            data = np.load(os.path.join(os.path.dirname(__file__), bank_path)) \
+                if not os.path.isabs(bank_path) else np.load(bank_path)
+            if "starts" in data and "goals" in data:
+                self._bank_starts = np.asarray(data["starts"], dtype=np.float64)
+                self._bank_goals = np.asarray(data["goals"], dtype=np.float64)
         self.difficulty = float(np.clip(difficulty, 0.0, 1.0))
         self.q = kin.Q_HOME.copy()
         self.goal = kin.Q_HOME.copy()
@@ -82,7 +96,20 @@ class PlanEnv:
     def reset(self) -> np.ndarray:
         self.obstacles = self._spheres()
 
-        # 起点：home 附近；目标：远离起点、且目标构型本身不碰撞
+        # 起点：一半概率用真实样本库（调用日志里的 start/goal），一半随机
+        if self._bank_starts is not None and self.rng.random() < self.bank_ratio:
+            for _ in range(20):
+                i = int(self.rng.integers(len(self._bank_starts)))
+                q = np.clip(self._bank_starts[i] + self.rng.uniform(
+                    -self.bank_jitter, self.bank_jitter, 7), kin.LIMITS[:, 0], kin.LIMITS[:, 1])
+                pts, _ = kin.forward(q)
+                if kin.min_clearance(pts, self.obstacles) > 0.05:
+                    self.q = q
+                    self.goal = np.clip(self._bank_goals[i], kin.LIMITS[:, 0], kin.LIMITS[:, 1])
+                    self.steps = 0
+                    self.prev = self._dist()
+                    return self._obs()
+
         self.q = self._sample_free(0.5)
         goal_spread = 0.50 + 0.50 * self.difficulty
         for _ in range(200):

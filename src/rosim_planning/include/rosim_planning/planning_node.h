@@ -138,11 +138,13 @@ private:
   std::map<std::string, MotionPlannerPtr> planner_cache_;
   // 测试/基准入口：用当前激活的规划器规划到关节目标（RL 接入后可直接验证）
   rclcpp::Service<rosim_interfaces::srv::PlanJoint>::SharedPtr plan_joint_srv_;
+  /// 按类型构造规划器（含缓存与回退装饰器）。"auto" = 直线 → RL → OMPL。
+  MotionPlannerPtr makePlanner(const std::string& type);
   void handlePlanJoint(const rosim_interfaces::srv::PlanJoint::Request::SharedPtr req,
                        const rosim_interfaces::srv::PlanJoint::Response::SharedPtr res);
   std::unique_ptr<EdgeFollower> follower_;
   std::string group_ = "manipulator";
-  std::string active_planner_ = "ompl";
+  std::string active_planner_ = "auto";
   // RL 失败时自动回退 OMPL：RL 在目标偏移大时会失败，作为"快速但不可靠"的
   // 前端规划器，失败必须有人兜底，否则调用方拿到硬失败。
   // ROSIM_RL_NO_FALLBACK=1 关闭（基准测试用，才能测到纯 RL 的成功率）。

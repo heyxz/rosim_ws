@@ -34,9 +34,11 @@
         │
         └─ MotionPlanner::plan()
              ├─ ompl   : RRTConnect + TOTG
+             ├─ line   : FallbackPlanner( LinePlanner, ompl )
              ├─ rl     : FallbackPlanner( RlRemotePlanner, ompl )
              │             └─ /rl_plan 服务 → scripts/rl_plan_node.py（ONNX）
-             └─ line   : FallbackPlanner( LinePlanner, ompl )
+             └─ auto   : 默认。line（确定性直线）→ rl（需要绕障时）→ ompl（兜底）
+                          = FallbackPlanner( line, FallbackPlanner( rl, ompl, 1.5 ), 1e9 )
 ```
 
 规划器切换：`set_planner` 服务。实例缓存在 `planner_cache_` 里，**切换不销毁
@@ -61,10 +63,14 @@
 
 模型产物（`policy.onnx` + `policy.json` 的归一化统计 + `eval_success`）：
 
-| 目录 | 维度 | 自评成功率 |
-| --- | --- | --- |
-| `rl_a/out_rail/` | 7 轴（导轨 + 6 关节） | 97.5%（训练分布内） |
-| `rl_a/out_a2/` | 6 轴 | 90.0%（训练分布内） |
+| 目录 | 维度 | 训练起点 | 自评 | 真实起点库 |
+| --- | --- | --- | --- | --- |
+| `rl_a/out_bank/` | 7 轴 | **真实调用起点库**（`scene_bank.npz`，50% 混合） | 62.5% | **68% 到达 / 0% 碰撞** |
+| `rl_a/out_rail/` | 7 轴 | home±噪声 | 97.5% | 48% 到达 / **52% 碰撞** |
+| `rl_a/out_a2/` | 6 轴 | home±噪声 | 90.0% | — |
+
+`out_bank` 是当前默认（`rl_plan.sh` 指向它）。注意 `out_rail` 自评虽高，但在
+真实起点上有 **一半概率碰撞**——自评不能替代真实起点评估。
 
 **注意**：自评只代表训练分布。实际起点常落在分布外，此时 RL 失败、由
 `FallbackPlanner` 回退 OMPL——这是设计行为，不是 bug。
