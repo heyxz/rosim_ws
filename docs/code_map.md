@@ -77,7 +77,6 @@
 | `run-server.sh` | systemd 服务的实际启动包装 |
 | `rosim-server.service` | 用户级 unit（不随开机自启，手动 start） |
 | `rl_plan_node.py` / `rl_plan.sh` | RL 策略推理服务（`/rl_plan`） |
-| `rl_demo_node.py` / `rl_demo.sh` | 方案 B 的独立演示通道（已被 A 取代，保留作对照） |
 | `verify_rl.py` | 四种规划器用例 + TCP 直线偏离度量 |
 | `rl_benchmark.py` | OMPL vs RL 基准（成功率/耗时/路径长度） |
 | `dump_scene.py` | 导出 MoveIt 规划场景（给训练侧用真实几何） |
@@ -87,8 +86,8 @@
 | 路径 | 内容 | 可否删除 |
 | --- | --- | --- |
 | `.pylibs/`（仓库根） | torch 2.6 + sb3 + onnxruntime（5.3 GB） | 不能，RL 运行时依赖 |
-| `rl_a/out_*/` | 模型与评估曲线 | 旧目录（`out_a`、`out_smoke`）可删 |
-| `.scratch/` | 测试日志、CSV、截图、一次性的 demo 副本 | 可删（`.pylibs` 已迁出） |
+| `rl_a/out_*/` | 模型与评估曲线（`out_rail`/`out_real`/`out_scene`/`out_a2`） | — |
+| `.scratch/home` | 服务进程的 HOME（`run-server.sh` 指定，ROS 日志落在这里） | **不能删** |
 
 ## 6. 回归与验证入口
 
