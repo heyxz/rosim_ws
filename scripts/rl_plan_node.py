@@ -48,6 +48,7 @@ class Policy:
                                          providers=["CPUExecutionProvider"])
         self.input = self.sess.get_inputs()[0].name
         self.eval_success = float(meta.get("eval_success", float("nan")))
+        self.obs_dim = int(meta.get("obs_dim", 22))
 
     def act(self, obs: np.ndarray) -> np.ndarray:
         x = (np.asarray(obs, np.float32) - self.mean) / np.sqrt(self.var + 1e-8)
@@ -91,9 +92,11 @@ class RlPlanNode(Node):
             self.get_logger().warn(f"日志写入失败: {exc}")
 
     def handle_plan(self, request, response):
-        if len(request.start) != 6 or len(request.goal) != 6:
+        # 6 维 = 只有手臂；7 维 = 导轨 + 手臂（策略的 obs_dim 决定）
+        n = 7 if self.policy.obs_dim == 25 else 6
+        if len(request.start) != n or len(request.goal) != n:
             response.success = False
-            response.message = "start/goal 必须是 6 维"
+            response.message = f"start/goal 必须是 {n} 维（当前策略 obs_dim={self.policy.obs_dim}）"
             return response
 
         q = np.clip(np.asarray(request.start, float), kin.LIMITS[:, 0], kin.LIMITS[:, 1])
@@ -105,14 +108,16 @@ class RlPlanNode(Node):
         reached = collided = False
         for step in range(MAX_STEPS):
             action = self.policy.act(self.observation(q, goal))
-            q = np.clip(q + action * MAX_DQ, kin.LIMITS[:, 0], kin.LIMITS[:, 1])
+            step_scale = kin.MAX_STEP if q.size == 7 else MAX_DQ
+            q = np.clip(q + action * step_scale, kin.LIMITS[:, 0], kin.LIMITS[:, 1])
             path.append(q.copy())
 
             pts, _ = kin.forward(q)
             clearance = kin.min_clearance(pts, self.obstacles)
             min_clearance = min(min_clearance, clearance)
 
-            if np.linalg.norm(q - goal) < TOL:
+            w = np.array([2.0, 1, 1, 1, 1, 1, 1]) if q.size == 7 else 1.0
+            if np.linalg.norm((q - goal) * w) < TOL:
                 reached = True
                 break
             if clearance < 0.0:

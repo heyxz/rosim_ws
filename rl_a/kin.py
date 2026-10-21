@@ -33,11 +33,15 @@ TOOL0_TO_TIP = (np.array([-0.081476, 0.000022, 0.364356]), np.array([0.0, 0.6283
 
 # rail_joint (0.09) + carriage_base_mount (0.077): present in the URDF, missing
 # from the demo model. Everything else already matched.
+# 导轨（第 7 轴）沿 X 平移，所以基座位置 = [rail, 0, 0.167]。
 BASE_OFFSET = np.array([0.0, 0.0, 0.167])
+RAIL_LIMITS = np.array([-1.05, 1.05])
+RAIL_VELOCITY = 1.2
 
-# URDF limits, with |j4| and |j6| clipped to pi (their URDF range is wider than
-# one turn; keeping them inside +-pi removes the wrap ambiguity for learning).
+# 7 维：第 0 维是导轨 [m]，其后是 j1..j6 [rad]
+# （和 SRDF 里 manipulator 组的变量顺序一致）
 LIMITS = np.array([
+    [-1.05, 1.05],
     [-2.967, 2.967],
     [-1.571, 2.705],
     [-1.484, 2.618],
@@ -46,11 +50,14 @@ LIMITS = np.array([
     [-3.000, 3.000],
 ])
 
+# 每步动作上限：导轨用米，关节用弧度
+MAX_STEP = np.array([0.03, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+
 # Capsule radius per link segment (base->j2, j2->j3, ..., flange->tcp).
 # 8 segments: base->j1->j2->j3->j4->j5->j6->flange->tcp (forward returns 9 points)
 CAPSULE_RADII = np.array([0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03])
 
-Q_HOME = np.array([0.0, -0.6, 0.0, 0.0, 0.6, 0.0])
+Q_HOME = np.array([0.0, 0.0, -0.6, 0.0, 0.0, 0.6, 0.0])   # [rail, j1..j6]
 
 
 def rot(axis: str, angle: float) -> np.ndarray:
@@ -78,6 +85,12 @@ def forward(q: np.ndarray):
 
     Points are base, j2, j3, j4, j5, j6, flange, tcp - the capsule chain.
     """
+    q = np.asarray(q, dtype=float)
+    if q.size == 6:                       # 兼容旧的 6 维调用（导轨视为 0）
+        q = np.concatenate([[0.0], q])
+    rail = float(q[0])
+    q = q[1:]
+
     T = np.eye(4)
     pts = [T[:3, 3].copy()]
     for i, (axis, origin) in enumerate(JOINTS):
@@ -88,19 +101,25 @@ def forward(q: np.ndarray):
     pts.append(T[:3, 3].copy())
     T = T @ tf(rpy(*TOOL0_TO_TIP[1]), TOOL0_TO_TIP[0])
     pts.append(T[:3, 3].copy())
-    pts = np.array(pts) + BASE_OFFSET
+    pts = np.array(pts) + BASE_OFFSET + np.array([rail, 0.0, 0.0])
     return pts, pts[-1].copy()
 
 
 def fk_pose(q: np.ndarray):
     """Return (R 3x3, t 3) of the tool tip — 直线插补/IK 需要完整位姿。"""
+    q = np.asarray(q, dtype=float)
+    if q.size == 6:
+        q = np.concatenate([[0.0], q])
+    rail = float(q[0])
+    q = q[1:]
+
     T = np.eye(4)
     for i, (axis, origin) in enumerate(JOINTS):
         T = T @ tf(np.eye(3), origin)
         T = T @ tf(rot(axis, AXIS_SIGN[i] * float(q[i])), np.zeros(3))
     T = T @ tf(rpy(*FLANGE_TOOL0[1]), FLANGE_TOOL0[0])
     T = T @ tf(rpy(*TOOL0_TO_TIP[1]), TOOL0_TO_TIP[0])
-    T = tf(np.eye(3), BASE_OFFSET) @ T
+    T = tf(np.eye(3), BASE_OFFSET + np.array([rail, 0.0, 0.0])) @ T
     return T[:3, :3].copy(), T[:3, 3].copy()
 
 
@@ -110,7 +129,10 @@ def ik(R_target: np.ndarray, t_target: np.ndarray, q0: np.ndarray,
 
     返回 (q, err)；err 单位为米/弧度混合量级，> tol 视为失败。
     """
-    q = np.clip(np.array(q0, dtype=float), LIMITS[:, 0], LIMITS[:, 1])
+    q = np.array(q0, dtype=float)
+    if q.size == 6:
+        q = np.concatenate([[0.0], q])
+    q = np.clip(q, LIMITS[:, 0], LIMITS[:, 1])
     eps = 1e-5
     for _ in range(iters):
         R, t = fk_pose(q)
@@ -129,8 +151,9 @@ def ik(R_target: np.ndarray, t_target: np.ndarray, q0: np.ndarray,
         if np.linalg.norm(e_pos) < tol and np.linalg.norm(e_rot) < tol * 10:
             return q, float(np.linalg.norm(e_pos))
 
-        J = np.zeros((6, 6))
-        for i in range(6):
+        n = q.size
+        J = np.zeros((6, n))
+        for i in range(n):
             qp = q.copy()
             qp[i] += eps
             Rp, tp = fk_pose(qp)

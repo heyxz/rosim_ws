@@ -55,7 +55,7 @@ class PlanEnv:
         parts = [
             self.q / 3.0,
             self.goal / 3.0,
-            (self.goal - self.q) / 3.0,
+            self._delta() / 3.0,
             tcp,
             [float(np.clip(clearance, -0.2, 1.0))],
         ]
@@ -63,11 +63,20 @@ class PlanEnv:
 
     @property
     def obs_dim(self) -> int:
-        return 22
+        return 25
 
     @property
     def act_dim(self) -> int:
-        return 6
+        return 7
+
+    # 导轨和关节的量纲不同：1 m 导轨大致等价 2 rad 关节，距离里按这个折算
+    DIST_WEIGHT = np.array([2.0, 1, 1, 1, 1, 1, 1])
+
+    def _delta(self) -> np.ndarray:
+        return self.goal - self.q
+
+    def _dist(self) -> float:
+        return float(np.linalg.norm(self._delta() * self.DIST_WEIGHT))
 
     # ------------------------------------------------------------------- gym
     def reset(self) -> np.ndarray:
@@ -78,31 +87,32 @@ class PlanEnv:
         goal_spread = 0.50 + 0.50 * self.difficulty
         for _ in range(200):
             goal = self._sample_free(goal_spread)
-            if np.linalg.norm(goal - self.q) > 0.5:
+            if float(np.linalg.norm((goal - self.q) * self.DIST_WEIGHT)) > 0.5:
                 self.goal = goal
                 break
         else:
             self.goal = np.clip(kin.Q_HOME + 0.8, kin.LIMITS[:, 0], kin.LIMITS[:, 1])
 
         self.steps = 0
-        self.prev = float(np.linalg.norm(self.q - self.goal))
+        self.prev = self._dist()
         return self._obs()
 
     def _sample_free(self, spread: float) -> np.ndarray:
         for _ in range(200):
-            q = kin.Q_HOME + self.rng.uniform(-spread, spread, 6)
+            scale = np.array([0.6, 1, 1, 1, 1, 1, 1])     # 导轨用米，幅度小一些
+            q = kin.Q_HOME + self.rng.uniform(-spread, spread, 7) * scale * 0.5
             q = np.clip(q, kin.LIMITS[:, 0], kin.LIMITS[:, 1])
             pts, _ = kin.forward(q)
             if kin.min_clearance(pts, self.obstacles) > 0.05:
                 return q
-        return np.clip(kin.Q_HOME + self.rng.uniform(-0.2, 0.2, 6),
+        return np.clip(kin.Q_HOME + self.rng.uniform(-0.2, 0.2, 7),
                        kin.LIMITS[:, 0], kin.LIMITS[:, 1])
 
     def step(self, action: np.ndarray):
-        a = np.clip(action, -1.0, 1.0) * MAX_DQ
+        a = np.clip(action, -1.0, 1.0) * kin.MAX_STEP
         self.q = np.clip(self.q + a, kin.LIMITS[:, 0], kin.LIMITS[:, 1])
         pts, tcp = kin.forward(self.q)
-        dist = float(np.linalg.norm(self.q - self.goal))
+        dist = self._dist()
         clearance = kin.min_clearance(pts, self.obstacles)
         self.steps += 1
 
