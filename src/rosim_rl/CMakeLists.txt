@@ -42,10 +42,6 @@ install(TARGETS rosim_rl
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY python/ DESTINATION share/${PROJECT_NAME}/python)
-# expose rosim_gym on PYTHONPATH so `python3 -m rosim_gym.random_rollout` works
-# right after sourcing the workspace
-ament_environment_hooks(env-hooks/${PROJECT_NAME}.dsv.in)
 
 ament_export_include_directories(include)
 ament_export_libraries(rosim_rl)
