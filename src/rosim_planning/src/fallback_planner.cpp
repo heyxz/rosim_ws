@@ -69,7 +69,7 @@ bool FallbackPlanner::plan(const PlanRequest& req, PlanResult& result)
   if (fallback_ && delta > max_delta_)
   {
     last_fallback_ = true;
-    last_note_ = "goal offset " + std::to_string(delta).substr(0, 4) + " rad > planner range";
+    last_note_ = "位移 " + std::to_string(delta).substr(0, 4) + " rad 超出 RL 范围";
     RCLCPP_INFO(logger_, "fallback: %s -> %s", last_note_.c_str(), fallback_->name().c_str());
     const bool ok = fallback_->plan(req, result);
     if (ok)

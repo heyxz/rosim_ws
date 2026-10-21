@@ -575,15 +575,17 @@ void PlanningNode::handlePlanJoint(
 
 std::string PlanningNode::plannerLabel() const
 {
+  // 只报"真正出解的那一级"：auto / rl 这些只是选择项，读者要的是 line/rl/ompl。
   std::string who = active_planner_;
+  std::string why;
   if (auto* fb = dynamic_cast<const FallbackPlanner*>(planner_.get()))
   {
     if (!fb->lastSuccessName().empty())
-      who += "（实际 " + fb->lastSuccessName() + "）";
+      who = fb->lastSuccessName();
     if (fb->lastFallback() && !fb->lastNote().empty())
-      who += "，" + fb->lastNote();
+      why = "（" + fb->lastNote() + "）";
   }
-  return who;
+  return who + why;
 }
 
 MotionPlannerPtr PlanningNode::makePlanner(const std::string& type)
