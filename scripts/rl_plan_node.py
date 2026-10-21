@@ -93,14 +93,23 @@ class RlPlanNode(Node):
 
     def handle_plan(self, request, response):
         # 6 维 = 只有手臂；7 维 = 导轨 + 手臂（策略的 obs_dim 决定）
-        n = 7 if self.policy.obs_dim == 25 else 6
-        if len(request.start) != n or len(request.goal) != n:
+        # C++ 一律发 7 维（导轨 + 6 关节）；6 维策略丢掉导轨那一维
+        n_in = len(request.start)
+        if n_in not in (6, 7) or len(request.goal) != n_in:
             response.success = False
-            response.message = f"start/goal 必须是 {n} 维（当前策略 obs_dim={self.policy.obs_dim}）"
+            response.message = f"start/goal 必须是 6 或 7 维（收到 {n_in}）"
             return response
 
-        q = np.clip(np.asarray(request.start, float), kin.LIMITS[:, 0], kin.LIMITS[:, 1])
-        goal = np.clip(np.asarray(request.goal, float), kin.LIMITS[:, 0], kin.LIMITS[:, 1])
+        want = 7 if self.policy.obs_dim == 25 else 6
+        q = np.asarray(request.start, float)
+        goal = np.asarray(request.goal, float)
+        if n_in == 7 and want == 6:
+            q, goal = q[1:], goal[1:]          # 丢掉导轨
+        elif n_in == 6 and want == 7:
+            q = np.concatenate([[0.0], q])     # 导轨视为 0
+            goal = np.concatenate([[0.0], goal])
+        q = np.clip(q, kin.LIMITS[:want, 0], kin.LIMITS[:want, 1])
+        goal = np.clip(goal, kin.LIMITS[:want, 0], kin.LIMITS[:want, 1])
         q_start = q.copy()
 
         path = [q.copy()]
