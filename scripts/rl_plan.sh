@@ -2,7 +2,7 @@
 # RL 策略推理节点：提供 /rl_plan 服务（供 C++ 的 RlRemotePlanner 调用）
 set -e
 RL_A_DIR="${RL_A_DIR:-/home/xz/rosim_ws/rl_a}"
-LIBS="${RL_PYLIBS:-/home/xz/rosim_ws/.scratch/rl_demo_ws/rosim_ws/rl_demo/.pylibs}"
+LIBS="${RL_PYLIBS:-/home/xz/rosim_ws/.pylibs}"
 source /opt/ros/humble/setup.bash
 source /home/xz/ws_moveit/install/setup.bash
 [ -f /home/xz/rosim_ws/install/setup.bash ] && source /home/xz/rosim_ws/install/setup.bash

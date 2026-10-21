@@ -17,7 +17,7 @@ find_package(moveit_core REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-add_library(rosim_rl SHARED src/rl_planner.cpp src/rl_remote_planner.cpp)
+add_library(rosim_rl SHARED src/rl_remote_planner.cpp)
 set_target_properties(rosim_rl PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(rosim_rl PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

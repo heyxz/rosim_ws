@@ -18,3 +18,6 @@ __pycache__/
 
 # 桥接自动维护的跨通道共享记忆
 AGENTS.local.md
+
+# RL 运行时依赖（5.3 GB，不入库）
+.pylibs/

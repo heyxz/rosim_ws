@@ -5,7 +5,7 @@
 #   ./run_train.sh --device cpu         # 强制 CPU
 set -e
 cd "$(dirname "$0")"
-export PYTHONPATH="$PWD/.pylibs:${PYTHONPATH}"
+export PYTHONPATH="${RL_PYLIBS:-/home/xz/rosim_ws/.pylibs}:$PWD:${PYTHONPATH}"
 export MPLCONFIGDIR="$PWD/.mpl"
 mkdir -p "$MPLCONFIGDIR"
 

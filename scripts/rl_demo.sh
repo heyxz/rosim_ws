@@ -11,6 +11,6 @@ if [ -f /home/xz/rosim_ws/install/setup.bash ]; then
   source /home/xz/rosim_ws/install/setup.bash
 fi
 export RL_DEMO_DIR="$DEMO_DIR"
-export PYTHONPATH="$DEMO_DIR/.pylibs:$DEMO_DIR:${PYTHONPATH}"
+export PYTHONPATH="${RL_PYLIBS:-/home/xz/rosim_ws/.pylibs}:$DEMO_DIR:${PYTHONPATH}"
 export MPLCONFIGDIR="$DEMO_DIR/.mpl"
 exec python3 /home/xz/rosim_ws/scripts/rl_demo_node.py "$@"
