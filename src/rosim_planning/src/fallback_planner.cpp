@@ -60,6 +60,7 @@ bool FallbackPlanner::plan(const PlanRequest& req, PlanResult& result)
 {
   last_fallback_ = false;
   last_note_.clear();
+  last_success_.clear();
 
   if (!primary_)
     return fallback_ && fallback_->plan(req, result);
@@ -70,13 +71,17 @@ bool FallbackPlanner::plan(const PlanRequest& req, PlanResult& result)
     last_fallback_ = true;
     last_note_ = "goal offset " + std::to_string(delta).substr(0, 4) + " rad > planner range";
     RCLCPP_INFO(logger_, "fallback: %s -> %s", last_note_.c_str(), fallback_->name().c_str());
-    return fallback_->plan(req, result);
+    const bool ok = fallback_->plan(req, result);
+    if (ok)
+      last_success_ = fallback_->name();
+    return ok;
   }
 
   PlanResult primary_result;
   if (primary_->plan(req, primary_result) && primary_result.success)
   {
     result = std::move(primary_result);
+    last_success_ = primary_->name();
     return true;
   }
 
@@ -93,6 +98,11 @@ bool FallbackPlanner::plan(const PlanRequest& req, PlanResult& result)
   if (fallback_->plan(req, fb) && fb.success)
   {
     result = std::move(fb);
+    last_success_ = fallback_->name();
+    // 回退链可能是嵌套的：直接问更深一级
+    if (auto* nested = dynamic_cast<const FallbackPlanner*>(fallback_.get()))
+      if (!nested->lastSuccessName().empty())
+        last_success_ = nested->lastSuccessName();
     return true;
   }
 

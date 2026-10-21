@@ -140,6 +140,8 @@ private:
   rclcpp::Service<rosim_interfaces::srv::PlanJoint>::SharedPtr plan_joint_srv_;
   /// 按类型构造规划器（含缓存与回退装饰器）。"auto" = 直线 → RL → OMPL。
   MotionPlannerPtr makePlanner(const std::string& type);
+  /// 当前规划器的可读名字（含回退说明），用于"规划完成"这条日志。
+  std::string plannerLabel() const;
   void handlePlanJoint(const rosim_interfaces::srv::PlanJoint::Request::SharedPtr req,
                        const rosim_interfaces::srv::PlanJoint::Response::SharedPtr res);
   std::unique_ptr<EdgeFollower> follower_;

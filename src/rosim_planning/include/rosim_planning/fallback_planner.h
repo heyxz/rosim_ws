@@ -36,6 +36,12 @@ public:
     return last_fallback_;
   }
 
+  /// 最近一次成功出解的规划器名（可能是 fallback 链里更深的一级）。
+  const std::string& lastSuccessName() const
+  {
+    return last_success_;
+  }
+
   const std::string& lastNote() const
   {
     return last_note_;
@@ -47,6 +53,7 @@ private:
   double max_delta_ = 1.5;  ///< 六关节位移的欧氏范数上限 [rad]
   rclcpp::Logger logger_;
   bool last_fallback_ = false;
+  std::string last_success_;
   std::string last_note_;
 };
 

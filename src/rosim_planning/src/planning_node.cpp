@@ -573,6 +573,19 @@ void PlanningNode::handlePlanJoint(
   }
 }
 
+std::string PlanningNode::plannerLabel() const
+{
+  std::string who = active_planner_;
+  if (auto* fb = dynamic_cast<const FallbackPlanner*>(planner_.get()))
+  {
+    if (!fb->lastSuccessName().empty())
+      who += "（实际 " + fb->lastSuccessName() + "）";
+    if (fb->lastFallback() && !fb->lastNote().empty())
+      who += "，" + fb->lastNote();
+  }
+  return who;
+}
+
 MotionPlannerPtr PlanningNode::makePlanner(const std::string& type)
 {
   const std::string key = type + (allow_fallback_ ? "+fb" : "");
@@ -1039,9 +1052,20 @@ void PlanningNode::executeFollowEdge(const std::shared_ptr<GoalHandleFollowEdge>
 
   // ---- resolve the edge ---------------------------------------------------
   auto feedback = std::make_shared<FollowEdge::Feedback>();
+  bool planner_reported = false;
   auto publish_feedback = [&](float progress, const std::string& phase) {
     feedback->progress = progress;
     feedback->phase = phase;
+    // 规划完成、开始沿缝走的那一刻，报告实际用的规划器（只报一次）
+    if (!planner_reported && phase == "following")
+    {
+      planner_reported = true;
+      feedback->note = "规划完成：规划器 " + plannerLabel();
+    }
+    else
+    {
+      feedback->note.clear();
+    }
     goal_handle->publish_feedback(feedback);
   };
   publish_feedback(0.0f, "resolving");
@@ -1291,11 +1315,21 @@ void PlanningNode::executeFollowSeams(const std::shared_ptr<GoalHandleFollowSeam
     params.seam_dwell = goal->seam_dwell;
 
     // Per-seam feedback is mapped into the batch's 0..1 progress.
+    bool seam_planner_reported = false;
     auto seam_feedback = [&](float p, const std::string& phase) {
       feedback->seam_index = static_cast<uint8_t>(std::min<std::size_t>(i, 255));
       feedback->phase = phase;
       feedback->progress =
           (static_cast<float>(i) + std::min(std::max(p, 0.0f), 1.0f)) / static_cast<float>(n);
+      if (!seam_planner_reported && phase == "following")
+      {
+        seam_planner_reported = true;
+        feedback->note = "焊缝 " + std::to_string(i + 1) + " 规划完成：规划器 " + plannerLabel();
+      }
+      else
+      {
+        feedback->note.clear();
+      }
       goal_handle->publish_feedback(feedback);
     };
 
