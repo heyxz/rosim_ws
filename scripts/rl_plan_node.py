@@ -74,6 +74,22 @@ class RlPlanNode(Node):
             [float(np.clip(clearance, -0.2, 1.0))],
         ]).astype(np.float32)
 
+    def _log_request(self, q, goal, reached, collided, steps):
+        """把每次调用追加到 JSONL；RL_PLAN_LOG 未设置则不记录。"""
+        path = os.environ.get("RL_PLAN_LOG")
+        if not path:
+            return
+        try:
+            with open(path, "a") as f:
+                f.write(json.dumps({
+                    "start": q.tolist(), "goal": goal.tolist(),
+                    "reached": bool(reached), "collided": bool(collided),
+                    "steps": int(steps),
+                    "delta": float(np.linalg.norm(goal - q)),
+                }) + "\n")
+        except OSError as exc:
+            self.get_logger().warn(f"日志写入失败: {exc}")
+
     def handle_plan(self, request, response):
         if len(request.start) != 6 or len(request.goal) != 6:
             response.success = False
@@ -82,6 +98,7 @@ class RlPlanNode(Node):
 
         q = np.clip(np.asarray(request.start, float), kin.LIMITS[:, 0], kin.LIMITS[:, 1])
         goal = np.clip(np.asarray(request.goal, float), kin.LIMITS[:, 0], kin.LIMITS[:, 1])
+        q_start = q.copy()
 
         path = [q.copy()]
         min_clearance = float("inf")
@@ -101,6 +118,10 @@ class RlPlanNode(Node):
             if clearance < 0.0:
                 collided = True
                 break
+
+        # 记录真实调用分布（方案 B 的训练数据来源）：start/goal 是调用方真正
+        # 发过来的位姿，训练和部署同分布才能避免"训练 90%、真实 0%"。
+        self._log_request(q_start, goal, reached, collided, len(path) - 1)
 
         response.success = bool(reached and not collided)
         response.path = np.concatenate(path).astype(float).tolist()

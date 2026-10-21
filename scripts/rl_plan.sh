@@ -6,6 +6,7 @@ LIBS="${RL_PYLIBS:-/home/xz/rosim_ws/.scratch/rl_demo_ws/rosim_ws/rl_demo/.pylib
 source /opt/ros/humble/setup.bash
 source /home/xz/ws_moveit/install/setup.bash
 [ -f /home/xz/rosim_ws/install/setup.bash ] && source /home/xz/rosim_ws/install/setup.bash
+export RL_PLAN_LOG="${RL_PLAN_LOG:-/home/xz/rosim_ws/.scratch/rl_requests.jsonl}"
 export RL_A_DIR
 export ROS_LOG_DIR="${ROS_LOG_DIR:-$HOME/.ros/log}"
 export ROS_HOME="${ROS_HOME:-$HOME/.ros}"
