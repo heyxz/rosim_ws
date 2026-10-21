@@ -6,3 +6,4 @@ __pycache__/
 .cmp.py
 out_scene/
 scene_bank.npz
+out_real/
