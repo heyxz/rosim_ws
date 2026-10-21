@@ -631,7 +631,7 @@
         </label>
         <div style="flex:0 0 100px">
           <label for="weld_speed" style="margin:0">焊速 (mm/s)</label>
-          <input id="weld_speed" type="number" step="1" min="0" value="0" />
+          <input id="weld_speed" type="number" step="1" min="0" value="20" title="焊缝目标速度 mm/s；填 0 = 不做匀速约束，按规划器剖面的中位速度（≈最高速）" />
         </div>
         <div style="flex:0 0 84px">
           <label for="seam_dwell" style="margin:0">起收弧停 (s)</label>
@@ -1784,17 +1784,29 @@ function onJson(j) {
     case "tcp_path":
       renderTcpPath(j.points, !!j.final);
       break;
-    case "follow_feedback":
+    case "follow_feedback": {
       $("progress_fill").style.width = (j.progress * 100) + "%";
       $("phase").textContent = j.phase + "  " + (j.progress * 100).toFixed(0) + "%";
+      // 阶段变化才写日志，否则 100 Hz 的 feedback 会把面板刷爆
+      if (j.phase !== lastPhase.seam) {
+        lastPhase.seam = j.phase;
+        log(`阶段：${j.phase}`, "note");
+      }
       if (j.note) log(j.note, "note");
       break;
-    case "seams_feedback":
+    }
+    case "seams_feedback": {
       $("progress_fill").style.width = (j.progress * 100) + "%";
       $("phase").textContent =
         `焊缝 ${j.seam_index + 1}/${j.seam_count} · ${j.phase} ${(j.progress * 100).toFixed(0)}%`;
+      const key = `${j.seam_index}:${j.phase}`;
+      if (key !== lastPhase.seams) {
+        lastPhase.seams = key;
+        log(`焊缝 ${j.seam_index + 1}/${j.seam_count} 阶段：${j.phase}`, "note");
+      }
       if (j.note) log(j.note, "note");
       break;
+    }
     case "plan_batch": {
       $("phase").textContent = `批量验证 ${j.ok}/${j.total} 成功`;
       log(`批量规划：成功 ${j.ok}/${j.total}，中位耗时 ${Math.round(j.median_ms)} ms`, j.ok === j.total ? "ok" : "err");
@@ -2010,6 +2022,7 @@ $("speed").oninput = () => {
   $("speed_val").textContent = Number($("speed").value).toFixed(2);
   send({ type: "set_speed", scale: parseFloat($("speed").value) });
 };
+const lastPhase = { seam: null, seams: null };
 $("planner").onchange = () => send({ type: "set_planner", planner_type: $("planner").value });
 $("plan_demo").onclick = () => {
   log(`规划演示（${$("planner").value}）…`);

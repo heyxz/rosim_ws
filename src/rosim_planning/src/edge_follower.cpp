@@ -612,6 +612,12 @@ double EdgeFollower::applySeamConstantSpeed(robot_trajectory::RobotTrajectory& r
     if (dt <= 0.0)
       return 0.0;
     v = ds[ds.size() / 2] / dt;
+    // weld_speed=0 不是"慢速焊接"，而是"不做匀速约束"——用的是规划剖面自己的
+    // 中位速度（通常就是最高速）。明确打一条，避免把这条当焊接速度。
+    RCLCPP_WARN(LOGGER,
+                "weld_speed=0: no constant-speed constraint, seam follows the planned "
+                "profile (median %.0f mm/s) - set 焊速 to the process value instead",
+                v * 1000.0);
   }
   if (v <= 1e-6)
     return 0.0;
