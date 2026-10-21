@@ -18,23 +18,36 @@ double jointDelta(const PlanRequest& req)
   if (!jmg)
     return 0.0;
 
+  // 约定：goal[0..5] 对应 j1..j6（组里第 7 个变量是 rail_joint，顺序不保证）
   const auto& names = jmg->getActiveJointModelNames();
-  const std::size_t n =
-      std::min<std::size_t>(req.goal_joint_positions.size(), names.size());
-
   double sum = 0.0;
-  for (std::size_t i = 0; i < n; ++i)
+  if (req.goal_joint_positions.size() == 6 && names.size() != 6)
   {
-    const double d = req.goal_joint_positions[i] - req.start.getVariablePosition(names[i]);
-    sum += d * d;
+    for (std::size_t i = 0; i < 6; ++i)
+    {
+      const double d =
+          req.goal_joint_positions[i] - req.start.getVariablePosition("j" + std::to_string(i + 1));
+      sum += d * d;
+    }
+  }
+  else
+  {
+    const std::size_t n =
+        std::min<std::size_t>(req.goal_joint_positions.size(), names.size());
+    for (std::size_t i = 0; i < n; ++i)
+    {
+      const double d = req.goal_joint_positions[i] - req.start.getVariablePosition(names[i]);
+      sum += d * d;
+    }
   }
   return std::sqrt(sum);
 }
 }  // namespace
 
 FallbackPlanner::FallbackPlanner(MotionPlannerPtr primary, MotionPlannerPtr fallback,
-                                 double max_delta)
-  : primary_(std::move(primary)), fallback_(std::move(fallback)), max_delta_(max_delta)
+                                 double max_delta, rclcpp::Logger logger)
+  : primary_(std::move(primary)), fallback_(std::move(fallback)), max_delta_(max_delta),
+    logger_(logger)
 {
 }
 
@@ -56,6 +69,7 @@ bool FallbackPlanner::plan(const PlanRequest& req, PlanResult& result)
   {
     last_fallback_ = true;
     last_note_ = "goal offset " + std::to_string(delta).substr(0, 4) + " rad > planner range";
+    RCLCPP_INFO(logger_, "fallback: %s -> %s", last_note_.c_str(), fallback_->name().c_str());
     return fallback_->plan(req, result);
   }
 
@@ -74,6 +88,7 @@ bool FallbackPlanner::plan(const PlanRequest& req, PlanResult& result)
 
   last_fallback_ = true;
   last_note_ = "primary failed (" + primary_result.error + "), fell back";
+  RCLCPP_INFO(logger_, "fallback: %s -> %s", primary_result.error.c_str(), fallback_->name().c_str());
   PlanResult fb;
   if (fallback_->plan(req, fb) && fb.success)
   {

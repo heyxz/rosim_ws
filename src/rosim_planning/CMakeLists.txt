@@ -30,6 +30,7 @@ find_package(Threads REQUIRED)
 add_library(rosim_planning_core SHARED
   src/motion_planner.cpp
   src/fallback_planner.cpp
+  src/line_planner.cpp
   src/ompl_planner.cpp
   src/edge_follower.cpp
   src/trajectory_timing.cpp

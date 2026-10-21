@@ -582,7 +582,10 @@ void PlanningNode::handleSetPlanner(
     if (req->planner_type != "ompl" && allow_fallback_)
     {
       auto fallback = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
-      next = std::make_shared<FallbackPlanner>(next, fallback, rl_max_delta_);
+      // 位移门限只对 RL 有意义（策略的训练范围有限）；直线规划器能走大位移，
+      // 是否可行由它自己的 IK/碰撞检查决定，所以不设门限。
+      const double gate = (req->planner_type == "rl") ? rl_max_delta_ : 1e9;
+      next = std::make_shared<FallbackPlanner>(next, fallback, gate, get_logger());
     }
     planner_ = next;
     follower_ = std::make_unique<EdgeFollower>(shared_from_this(), model_, planner_);

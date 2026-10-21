@@ -23,7 +23,8 @@ namespace rosim::planning
 class FallbackPlanner : public MotionPlanner
 {
 public:
-  FallbackPlanner(MotionPlannerPtr primary, MotionPlannerPtr fallback, double max_delta);
+  FallbackPlanner(MotionPlannerPtr primary, MotionPlannerPtr fallback, double max_delta,
+                  rclcpp::Logger logger = rclcpp::get_logger("fallback_planner"));
 
   std::string name() const override;
 
@@ -44,6 +45,7 @@ private:
   MotionPlannerPtr primary_;
   MotionPlannerPtr fallback_;
   double max_delta_ = 1.5;  ///< 六关节位移的欧氏范数上限 [rad]
+  rclcpp::Logger logger_;
   bool last_fallback_ = false;
   std::string last_note_;
 };
