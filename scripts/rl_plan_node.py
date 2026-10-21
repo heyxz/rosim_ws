@@ -149,7 +149,7 @@ class RlPlanNode(Node):
 
 
 def main() -> int:
-    out_dir = os.environ.get("RL_OUT_DIR", os.path.join(RL_A_DIR, "out_bank"))  # 真实起点训练的版本
+    out_dir = os.environ.get("RL_OUT_DIR", os.path.join(RL_A_DIR, "out_bank_scene"))  # 真实几何 + 真实起点
     rclpy.init()
     node = RlPlanNode(out_dir)
     try:

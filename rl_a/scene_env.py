@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 import kin
@@ -33,9 +35,10 @@ class WorkpieceEnv(PlanEnv):
     YAW_RANGE = np.deg2rad(8.0)
 
     def __init__(self, seed=None, difficulty=1.0, horizon=300,
-                 bank="scene_bank.npz",
-                 scene="/home/xz/rosim_ws/.scratch/scene.json"):
+                 bank=None, bank_path=None, bank_ratio=0.5,
+                 scene=os.path.join(os.path.dirname(__file__), "scene.json")):
         super().__init__(seed=seed, difficulty=difficulty, horizon=horizon)
+        bank = bank_path or bank or os.path.join(os.path.dirname(__file__), "scene_bank.npz")
         self.part = RealWorkpiece(scene)
         self.centre0 = self.part.centre0
         data = np.load(bank)

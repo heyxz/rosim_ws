@@ -8,7 +8,7 @@ source /home/xz/ws_moveit/install/setup.bash
 [ -f /home/xz/rosim_ws/install/setup.bash ] && source /home/xz/rosim_ws/install/setup.bash
 export RL_PLAN_LOG="${RL_PLAN_LOG:-/home/xz/rosim_ws/.scratch/rl_requests.jsonl}"
 export ROSIM_RL_MAX_DELTA="${ROSIM_RL_MAX_DELTA:-1.5}"
-export RL_OUT_DIR="${RL_OUT_DIR:-$RL_A_DIR/out_bank}"
+export RL_OUT_DIR="${RL_OUT_DIR:-$RL_A_DIR/out_bank_scene}"
 export RL_A_DIR
 export ROS_LOG_DIR="${ROS_LOG_DIR:-$HOME/.ros/log}"
 export ROS_HOME="${ROS_HOME:-$HOME/.ros}"
