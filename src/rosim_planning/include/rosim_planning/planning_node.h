@@ -132,6 +132,10 @@ private:
   moveit::core::RobotModelPtr model_;
   planning_scene::PlanningScenePtr scene_;
   MotionPlannerPtr planner_;
+  // 规划器实例缓存：set_planner 只是切换指针，不销毁旧实例。
+  // 原因：OMPL 求解失败（error -27）后立刻释放其对象会 SIGSEGV（见 2026-10-21
+  // 的验证记录），缓存实例让规划器活到节点退出，切换也更快。
+  std::map<std::string, MotionPlannerPtr> planner_cache_;
   // 测试/基准入口：用当前激活的规划器规划到关节目标（RL 接入后可直接验证）
   rclcpp::Service<rosim_interfaces::srv::PlanJoint>::SharedPtr plan_joint_srv_;
   void handlePlanJoint(const rosim_interfaces::srv::PlanJoint::Request::SharedPtr req,

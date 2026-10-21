@@ -575,17 +575,27 @@ void PlanningNode::handleSetPlanner(
 {
   try
   {
-    auto next = MotionPlannerFactory::create(req->planner_type, shared_from_this(), model_);
-
-    // 非 OMPL 的规划器（目前是 RL）外面套一层回退装饰器：焊缝跟随的接近/退刀
-    // 段也是直接调 planner_->plan()，规则必须对所有调用方一致。
-    if (req->planner_type != "ompl" && allow_fallback_)
+    const std::string key = req->planner_type + (allow_fallback_ ? "+fb" : "");
+    MotionPlannerPtr next;
+    auto cached = planner_cache_.find(key);
+    if (cached != planner_cache_.end())
     {
-      auto fallback = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
-      // 位移门限只对 RL 有意义（策略的训练范围有限）；直线规划器能走大位移，
-      // 是否可行由它自己的 IK/碰撞检查决定，所以不设门限。
-      const double gate = (req->planner_type == "rl") ? rl_max_delta_ : 1e9;
-      next = std::make_shared<FallbackPlanner>(next, fallback, gate, get_logger());
+      next = cached->second;                 // 复用，不重建（也避免销毁旧实例）
+    }
+    else
+    {
+      next = MotionPlannerFactory::create(req->planner_type, shared_from_this(), model_);
+      // 非 OMPL 的规划器（RL / 直线）外面套一层回退装饰器：焊缝跟随的接近/
+      // 退刀段也是直接调 planner_->plan()，规则必须对所有调用方一致。
+      if (req->planner_type != "ompl" && allow_fallback_)
+      {
+        auto fallback = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
+        // 位移门限只对 RL 有意义（策略训练范围有限）；直线规划器能走大位移，
+        // 是否可行由它自己的 IK/碰撞检查决定，所以不设门限。
+        const double gate = (req->planner_type == "rl") ? rl_max_delta_ : 1e9;
+        next = std::make_shared<FallbackPlanner>(next, fallback, gate, get_logger());
+      }
+      planner_cache_[key] = next;
     }
     planner_ = next;
     follower_ = std::make_unique<EdgeFollower>(shared_from_this(), model_, planner_);
