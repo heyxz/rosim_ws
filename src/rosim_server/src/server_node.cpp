@@ -848,7 +848,6 @@ void ServerNode::handlePlanDemo(const nlohmann::json& j)
     return;
   }
 
-  // Goal = current arm joints + the delta from the page (default: a visible move).
   static const double kDefault[6] = { 0.5, 0.15, 0.0, 0.0, 0.1, 0.0 };
   std::array<double, 6> arm{};
   {
@@ -858,25 +857,119 @@ void ServerNode::handlePlanDemo(const nlohmann::json& j)
       arm[i] = display_state_ ? display_state_->getVariablePosition("j" + std::to_string(i + 1))
                               : 0.0;
   }
-  const auto d = j.value("delta", std::vector<double>(kDefault, kDefault + 6));
-  auto req = std::make_shared<rosim_interfaces::srv::PlanJoint::Request>();
-  for (int i = 0; i < 6; ++i)
-    req->goal.push_back(arm[i] + (i < static_cast<int>(d.size()) ? d[i] : 0.0));
 
-  plan_joint_client_->async_send_request(
-      req, [this](rclcpp::Client<rosim_interfaces::srv::PlanJoint>::SharedFuture future) {
-        const auto res = future.get();
-        nlohmann::json out;
-        out["type"] = "plan_result";
-        out["success"] = res->success;
-        out["message"] = res->message;
-        broadcastJson(out);   // takes a json value; .dump() here would double-encode
-        if (res->success)
-        {
-          publishTcpPath(res->trajectory);
-          broadcastTcpPathFinalLocked();
-        }
-      });
+  const int trials = std::clamp(j.value("trials", 1), 1, 20);
+  if (trials <= 1)
+  {
+    // 单个目标：沿用页面传来的增量
+    const auto d = j.value("delta", std::vector<double>(kDefault, kDefault + 6));
+    std::array<double, 6> delta{};
+    for (int i = 0; i < 6; ++i)
+      delta[i] = i < static_cast<int>(d.size()) ? d[i] : 0.0;
+    runPlanBatch(arm, 1, &delta);
+    return;
+  }
+  runPlanBatch(arm, trials, nullptr);
+}
+
+namespace
+{
+/// 批量验证用的固定目标集（确定、可复现，换规划器后再跑同一批即可对比）。
+const std::array<std::array<double, 6>, 12>& planBatchDeltas()
+{
+  static const std::array<std::array<double, 6>, 12> kDeltas{ {
+      { 0.30, 0.00, 0.00, 0.00, 0.00, 0.00 },
+      { 0.60, 0.00, 0.00, 0.00, 0.00, 0.00 },
+      { 0.00, 0.30, 0.00, 0.00, 0.00, 0.00 },
+      { 0.00, -0.40, 0.00, 0.00, 0.00, 0.00 },
+      { 0.00, 0.00, 0.35, 0.00, 0.00, 0.00 },
+      { 0.00, 0.00, -0.30, 0.00, 0.00, 0.00 },
+      { 0.00, 0.00, 0.00, 0.50, 0.00, 0.00 },
+      { 0.00, 0.00, 0.00, 0.00, 0.45, 0.00 },
+      { 0.00, 0.00, 0.00, 0.00, 0.00, 0.60 },
+      { 0.25, 0.20, 0.00, 0.00, 0.15, 0.00 },
+      { 0.00, 0.25, -0.20, 0.00, 0.00, 0.30 },
+      { -0.30, 0.15, 0.20, 0.00, -0.15, 0.00 },
+  } };
+  return kDeltas;
+}
+}  // namespace
+
+void ServerNode::runPlanBatch(const std::array<double, 6>& arm, int trials,
+                              const std::array<double, 6>* fixed_delta)
+{
+  const auto& deltas = planBatchDeltas();
+  const int n = std::min(trials, static_cast<int>(deltas.size()));
+
+  // 共享状态：跨 N 次异步响应累计结果
+  struct State
+  {
+    int n = 0;
+    int done = 0;
+    int ok = 0;
+    std::vector<double> ms;
+    bool drawn = false;
+    std::chrono::steady_clock::time_point t0;
+  };
+  auto st = std::make_shared<State>();
+  st->n = n;
+
+  auto step = std::make_shared<std::function<void(int)>>();
+  *step = [this, arm, n, fixed_delta, st, step](int i) {
+    if (i >= n)
+    {
+      double median = 0.0;
+      if (!st->ms.empty())
+      {
+        auto v = st->ms;
+        std::sort(v.begin(), v.end());
+        median = v[v.size() / 2];
+      }
+      nlohmann::json out;
+      out["type"] = "plan_batch";
+      out["ok"] = st->ok;
+      out["total"] = n;
+      out["median_ms"] = median;
+      broadcastJson(out);
+      return;
+    }
+
+    auto req = std::make_shared<rosim_interfaces::srv::PlanJoint::Request>();
+    std::array<double, 6> d{};
+    if (fixed_delta)
+      d = *fixed_delta;
+    else
+      d = planBatchDeltas()[i];
+    for (int k = 0; k < 6; ++k)
+      req->goal.push_back(arm[k] + d[k]);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    plan_joint_client_->async_send_request(
+        req, [this, st, step, i, t0](rclcpp::Client<rosim_interfaces::srv::PlanJoint>::SharedFuture future) {
+          const auto res = future.get();
+          const double ms = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - t0).count();
+          ++st->done;
+          if (res->success)
+          {
+            ++st->ok;
+            st->ms.push_back(ms);
+            if (!st->drawn)
+            {
+              st->drawn = true;
+              publishTcpPath(res->trajectory);
+              broadcastTcpPathFinalLocked();
+            }
+          }
+          nlohmann::json one;
+          one["type"] = "plan_result";
+          one["success"] = res->success;
+          one["message"] = "[" + std::to_string(i + 1) + "/" + std::to_string(st->n) + "] " + res->message;
+          broadcastJson(one);
+          (*step)(i + 1);
+        });
+  };
+  (*step)(0);
 }
 
 void ServerNode::publishTcpPath(const trajectory_msgs::msg::JointTrajectory& traj)

@@ -153,6 +153,9 @@ private:
   // "规划演示"：用当前激活的规划器规划到关节目标并画出来
   rclcpp::Client<rosim_interfaces::srv::PlanJoint>::SharedPtr plan_joint_client_;
   void handlePlanDemo(const nlohmann::json& j);
+  /// 批量规划验证：从当前位姿依次规划 trials 个目标，汇报成功率/耗时。
+  void runPlanBatch(const std::array<double, 6>& arm, int trials,
+                    const std::array<double, 6>* fixed_delta);
   std::mutex joint_mutex_;
   sensor_msgs::msg::JointState::SharedPtr pending_joint_;
 

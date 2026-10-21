@@ -686,7 +686,8 @@
           <option value="line">line（直线）</option>
           <option value="rl">rl</option>
         </select>
-        <button id="plan_demo" title="用当前规划器规划一次到关节目标，并把路径画出来">规划演示</button>
+        <input id="plan_trials" type="number" min="1" max="12" value="1" style="width:48px" title="规划次数：>1 时用固定目标集批量验证" />
+        <button id="plan_demo" title="用当前规划器规划（次数>1 时跑固定目标集并汇报成功率）">规划演示</button>
       </div>
     </section>
 
@@ -1794,6 +1795,11 @@ function onJson(j) {
         `焊缝 ${j.seam_index + 1}/${j.seam_count} · ${j.phase} ${(j.progress * 100).toFixed(0)}%`;
       if (j.note) log(j.note, "note");
       break;
+    case "plan_batch": {
+      $("phase").textContent = `批量验证 ${j.ok}/${j.total} 成功`;
+      log(`批量规划：成功 ${j.ok}/${j.total}，中位耗时 ${Math.round(j.median_ms)} ms`, j.ok === j.total ? "ok" : "err");
+      break;
+    }
     case "plan_result": {
       $("phase").textContent = j.success ? "规划成功" : "规划失败";
       log(j.message || "", j.success ? "ok" : "err");
@@ -2007,7 +2013,7 @@ $("speed").oninput = () => {
 $("planner").onchange = () => send({ type: "set_planner", planner_type: $("planner").value });
 $("plan_demo").onclick = () => {
   log(`规划演示（${$("planner").value}）…`);
-  send({ type: "plan_demo" });
+  send({ type: "plan_demo", trials: parseInt($("plan_trials").value || "1", 10) });
 };
 
 renderJogRows();
