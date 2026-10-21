@@ -5,6 +5,8 @@
 
 #include "rosim_planning/planning_node.h"
 
+#include <cstdlib>
+
 #include "rosim_planning/trajectory_timing.h"
 
 #include <algorithm>
@@ -65,6 +67,11 @@ PlanningNode::PlanningNode(const rclcpp::NodeOptions& options)
 
 void PlanningNode::init()
 {
+  allow_fallback_ = std::getenv("ROSIM_RL_NO_FALLBACK") == nullptr;
+  if (const char* d = std::getenv("ROSIM_RL_MAX_DELTA"))
+  {
+    rl_max_delta_ = std::atof(d);
+  }
   registerOmplPlanner();  // idempotent; ensures "ompl" exists even if only this lib is linked
 
   // Optional extension point: dlopen extra planner libraries (e.g.
@@ -534,12 +541,54 @@ void PlanningNode::handlePlanJoint(
     preq.velocity_scaling = speed_scale_;
     preq.acceleration_scaling = speed_scale_;
 
+    // RL 只用于小位移；目标太大时直接 OMPL（见 rl_max_delta_ 的注释）
+    double delta_norm = 0.0;
+    if (active_planner_ != "ompl" && allow_fallback_ && preq.goal_joint_positions.size() >= 6 &&
+        current_state_)
+    {
+      for (size_t i = 0; i < 6; ++i)
+      {
+        const double q0 = current_state_->getVariablePosition("j" + std::to_string(i + 1));
+        const double d = preq.goal_joint_positions[i] - q0;
+        delta_norm += d * d;
+      }
+      delta_norm = std::sqrt(delta_norm);
+    }
+
     PlanResult result;
-    const bool ok = planner_ && planner_->plan(preq, result) && result.success;
+    bool ok = false;
+    std::string note;
+    if (delta_norm > rl_max_delta_ && active_planner_ != "ompl")
+    {
+      note = "goal offset " + std::to_string(delta_norm).substr(0, 4) +
+             " rad > rl range, used ompl";
+      if (!fallback_planner_)
+        fallback_planner_ = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
+      ok = fallback_planner_ && fallback_planner_->plan(preq, result) && result.success;
+    }
+    else
+    {
+      ok = planner_ && planner_->plan(preq, result) && result.success;
+    }
+    if (!ok && note.empty() && allow_fallback_ && active_planner_ != "ompl")
+    {
+      // RL 的失败率随目标偏移上升（1.8 rad 时约 60% 失败），直接返回失败会让
+      // 调用方拿到硬错误；这里用 OMPL 兜底，并在消息里写明是回退的结果。
+      note = "rl failed (" + result.error + "), fell back to ompl";
+      PlanResult fb;
+      if (!fallback_planner_)
+        fallback_planner_ = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
+      ok = fallback_planner_ && fallback_planner_->plan(preq, fb) && fb.success;
+      if (ok)
+        result = std::move(fb);   // PlanResult 持有 unique_ptr，只能移动
+      else
+        note = "rl failed (" + result.error + ") and ompl fallback failed (" + fb.error + ")";
+    }
     const double ms = std::chrono::duration<double, std::milli>(clock::now() - t0).count();
     res->success = ok;
-    res->message = ok ? (active_planner_ + " ok, " + std::to_string(result.trajectory->size()) +
-                         " points, " + std::to_string(static_cast<int>(ms)) + " ms")
+    res->message = ok ? ((note.empty() ? active_planner_ : note) + ", " +
+                         std::to_string(result.trajectory->size()) + " points, " +
+                         std::to_string(static_cast<int>(ms)) + " ms")
                       : ("plan failed: " + result.error);
     if (ok)
     {

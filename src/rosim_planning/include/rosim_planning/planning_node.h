@@ -139,6 +139,15 @@ private:
   std::unique_ptr<EdgeFollower> follower_;
   std::string group_ = "manipulator";
   std::string active_planner_ = "ompl";
+  // RL 失败时自动回退 OMPL：RL 在目标偏移大时会失败，作为"快速但不可靠"的
+  // 前端规划器，失败必须有人兜底，否则调用方拿到硬失败。
+  // ROSIM_RL_NO_FALLBACK=1 关闭（基准测试用，才能测到纯 RL 的成功率）。
+  MotionPlannerPtr fallback_planner_;
+  bool allow_fallback_ = true;
+  // RL 的成功率随目标偏移明显下降（0.7 rad 100%、1.2 rad 80%、1.8 rad 40%，
+  // 实测见 .scratch/rl_bench.md）。超过这个偏移就直接走 OMPL，避免"先失败
+  // 再回退"把耗时从 13 ms 拉到 92 ms。
+  double rl_max_delta_ = 1.5;
   double speed_scale_ = 1.0;
   double jerk_limit_ = 100.0;  ///< default jerk limit for the S-curve pass [rad/s^3]
 
