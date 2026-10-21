@@ -30,6 +30,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 import env as env_mod
+import scene_env as scene_mod
 import kin
 
 # TensorBoard is optional: the eval CSV is enough to plot the curve, and a
@@ -45,6 +46,7 @@ except Exception as exc:  # pragma: no cover - environment dependent
 
 
 MAX_DQ = env_mod.MAX_DQ
+ENV_CLS = env_mod.PlanEnv
 
 
 class ArmGym(gym.Env):
@@ -53,7 +55,7 @@ class ArmGym(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, seed: int = 0, difficulty: float = 0.0):
-        self.env = env_mod.PlanEnv(seed=seed, difficulty=difficulty)
+        self.env = ENV_CLS(seed=seed, difficulty=difficulty)
         self.observation_space = spaces.Box(-np.inf, np.inf, (self.env.obs_dim,), np.float32)
         self.action_space = spaces.Box(-1.0, 1.0, (self.env.act_dim,), np.float32)
 
@@ -88,8 +90,8 @@ class Curriculum(BaseCallback):
         self.next_check = every
         self.rows = []
         self._t_prev = None
-        self.eval_env = env_mod.PlanEnv(seed=99991, difficulty=0.0)
-        self.hard_env = env_mod.PlanEnv(seed=99992, difficulty=1.0)
+        self.eval_env = ENV_CLS(seed=99991, difficulty=0.0)
+        self.hard_env = ENV_CLS(seed=99992, difficulty=1.0)
 
     def _on_step(self) -> bool:
         if self.num_timesteps < self.next_check:
@@ -167,11 +169,16 @@ def main():
     ap.add_argument("--device", default="auto", help="auto / cpu / cuda")
     ap.add_argument("--serial", action="store_true", help="DummyVecEnv instead of subprocesses")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--env", choices=["plan", "scene"], default="plan",
+                    help="plan=随机关节目标；scene=工件位姿随机的接近任务")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
     print(f"device={args.device} envs={args.envs} timesteps={args.timesteps}")
 
+    global ENV_CLS
+    ENV_CLS = scene_mod.WorkpieceEnv if args.env == "scene" else env_mod.PlanEnv
+    print("env:", ENV_CLS.__name__)
     fns = [make_env(i, args.seed, 0.0) for i in range(args.envs)]
     venv = DummyVecEnv(fns) if args.serial else SubprocVecEnv(fns)
     venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=5.0)
@@ -200,7 +207,7 @@ def main():
     vecnorm = VecNormalize.load(os.path.join(args.out, "vecnormalize.pkl"), venv)
     vecnorm.training = False
 
-    ev = env_mod.PlanEnv(seed=4242, difficulty=1.0)
+    ev = ENV_CLS(seed=4242, difficulty=1.0)
     ok = coll = 0
     best_rec = None
     for _ in range(40):
@@ -230,12 +237,6 @@ def main():
 
     # ---- artifacts for the C++ planner -------------------------------------
     onnx_path = os.path.join(args.out, "policy.onnx")
-    # Export happens in export_best.py: training's own `best_model` is chosen on
-    # 10-episode evals (an early lucky run sets an unreachable bar), so the final
-    # model can be far better. Choose between them with one evaluation pass.
-    import subprocess
-    subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "export_best.py"),
-                    args.out, "40"], check=False)
     meta = {
         "obs_dim": int(model.observation_space.shape[0]),
         "act_dim": int(model.action_space.shape[0]),
@@ -245,8 +246,13 @@ def main():
         "clip_obs": 5.0,
         "eval_success": ok / 40.0,
     }
+    # policy.json 先写：export_best.py 要用这里的归一化统计去比较 best/final，
+    # 然后重写 policy.json + policy.onnx 成更好的那一版。
     with open(os.path.join(args.out, "policy.json"), "w") as f:
         json.dump(meta, f, indent=1)
+    import subprocess
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "export_best.py"),
+                    args.out, "40", args.env], check=False)
     print("wrote", onnx_path, "and policy.json")
 
 

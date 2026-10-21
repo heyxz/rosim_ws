@@ -135,7 +135,7 @@ class RlPlanNode(Node):
 
 
 def main() -> int:
-    out_dir = os.environ.get("RL_OUT_DIR", os.path.join(RL_A_DIR, "out_a2"))
+    out_dir = os.environ.get("RL_OUT_DIR", os.path.join(RL_A_DIR, "out_a2"))  # RL_OUT_DIR 可指向别的策略目录
     rclpy.init()
     node = RlPlanNode(out_dir)
     try:

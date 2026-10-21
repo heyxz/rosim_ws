@@ -4,3 +4,5 @@ out_smoke/
 __pycache__/
 .evaluate.py
 .cmp.py
+out_scene/
+scene_bank.npz

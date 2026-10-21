@@ -92,6 +92,66 @@ def forward(q: np.ndarray):
     return pts, pts[-1].copy()
 
 
+def fk_pose(q: np.ndarray):
+    """Return (R 3x3, t 3) of the tool tip — 直线插补/IK 需要完整位姿。"""
+    T = np.eye(4)
+    for i, (axis, origin) in enumerate(JOINTS):
+        T = T @ tf(np.eye(3), origin)
+        T = T @ tf(rot(axis, AXIS_SIGN[i] * float(q[i])), np.zeros(3))
+    T = T @ tf(rpy(*FLANGE_TOOL0[1]), FLANGE_TOOL0[0])
+    T = T @ tf(rpy(*TOOL0_TO_TIP[1]), TOOL0_TO_TIP[0])
+    T = tf(np.eye(3), BASE_OFFSET) @ T
+    return T[:3, :3].copy(), T[:3, 3].copy()
+
+
+def ik(R_target: np.ndarray, t_target: np.ndarray, q0: np.ndarray,
+       iters: int = 80, tol: float = 2e-3, damping: float = 0.05):
+    """阻尼最小二乘 IK（数值雅可比）。
+
+    返回 (q, err)；err 单位为米/弧度混合量级，> tol 视为失败。
+    """
+    q = np.clip(np.array(q0, dtype=float), LIMITS[:, 0], LIMITS[:, 1])
+    eps = 1e-5
+    for _ in range(iters):
+        R, t = fk_pose(q)
+        # 位姿误差：位置误差 + 旋转误差（轴角）
+        e_pos = t_target - t
+        Rerr = R_target @ R.T
+        ang = np.arccos(np.clip((np.trace(Rerr) - 1.0) / 2.0, -1.0, 1.0))
+        if ang < 1e-8:
+            e_rot = np.zeros(3)
+        else:
+            axis = np.array([Rerr[2, 1] - Rerr[1, 2],
+                             Rerr[0, 2] - Rerr[2, 0],
+                             Rerr[1, 0] - Rerr[0, 1]]) / (2.0 * np.sin(ang))
+            e_rot = axis * ang
+        err = np.concatenate([e_pos, e_rot])
+        if np.linalg.norm(e_pos) < tol and np.linalg.norm(e_rot) < tol * 10:
+            return q, float(np.linalg.norm(e_pos))
+
+        J = np.zeros((6, 6))
+        for i in range(6):
+            qp = q.copy()
+            qp[i] += eps
+            Rp, tp = fk_pose(qp)
+            J[:3, i] = (tp - t) / eps
+            Rdp = Rp @ R.T
+            a = np.arccos(np.clip((np.trace(Rdp) - 1.0) / 2.0, -1.0, 1.0))
+            if a < 1e-8:
+                J[3:, i] = 0.0
+            else:
+                ax = np.array([Rdp[2, 1] - Rdp[1, 2],
+                               Rdp[0, 2] - Rdp[2, 0],
+                               Rdp[1, 0] - Rdp[0, 1]]) / (2.0 * np.sin(a))
+                J[3:, i] = ax * a / eps
+
+        dq = J.T @ np.linalg.solve(J @ J.T + damping ** 2 * np.eye(6), err)
+        q = np.clip(q + np.clip(dq, -0.2, 0.2), LIMITS[:, 0], LIMITS[:, 1])
+
+    R, t = fk_pose(q)
+    return q, float(np.linalg.norm(t_target - t))
+
+
 def segment_distance(p0: np.ndarray, p1: np.ndarray, c: np.ndarray) -> float:
     d = p1 - p0
     denom = float(d @ d)

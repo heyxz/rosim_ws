@@ -10,10 +10,13 @@ import json, sys
 import numpy as np
 
 import env as env_mod
+import scene_env as scene_mod
 from stable_baselines3 import PPO
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "out_a2"
 EPISODES = int(sys.argv[2]) if len(sys.argv) > 2 else 40
+ENV_NAME = sys.argv[3] if len(sys.argv) > 3 else "plan"
+ENV_CLS = scene_mod.WorkpieceEnv if ENV_NAME == "scene" else env_mod.PlanEnv
 
 with open(f"{OUT}/policy.json") as f:
     meta = json.load(f)
@@ -29,7 +32,7 @@ def normalize(obs):
 
 def evaluate(model_path):
     model = PPO.load(model_path, device="cpu")
-    ev = env_mod.PlanEnv(seed=7777, difficulty=1.0)
+    ev = ENV_CLS(seed=7777, difficulty=1.0)
     ok = coll = 0
     for _ in range(EPISODES):
         obs = ev.reset()
