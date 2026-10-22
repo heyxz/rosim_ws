@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(ROOT, "rl_a"))
 import kin  # noqa: E402
 import real_scene  # noqa: E402
 
-PLANNERS = ("auto", "line", "rl", "ompl")
+PLANNERS = ("ompl", "rl", "hybrid", "auto", "line")
 GROUP_SIZE = {"free": 8, "long": 4, "blocked": 6}
 
 
