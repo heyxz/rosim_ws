@@ -8,6 +8,7 @@
 #include <cstdlib>
 
 #include "rosim_planning/fallback_planner.h"
+#include "rosim_planning/hybrid_planner.h"
 #include "rosim_planning/trajectory_timing.h"
 
 #include <algorithm>
@@ -607,6 +608,13 @@ MotionPlannerPtr PlanningNode::makePlanner(const std::string& type)
     next = std::make_shared<FallbackPlanner>(
         MotionPlannerFactory::create("line", shared_from_this(), model_), rl_chain, 1e9,
         get_logger());
+  }
+  else if (type == "hybrid")
+  {
+    // H3：RL 出初解 → 校验 → 保留无碰撞前缀，OMPL 修复后半段。
+    auto ompl = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
+    auto rl = MotionPlannerFactory::create("rl", shared_from_this(), model_);
+    next = std::make_shared<HybridPlanner>(rl, ompl, rl_max_delta_, get_logger());
   }
   else
   {
