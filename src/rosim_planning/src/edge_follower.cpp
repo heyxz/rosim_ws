@@ -1307,9 +1307,9 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
 
   PlanResult preres;
   if (!planner_->plan(preq, preres) || !preres.success || !preres.trajectory)
-    return report_error(ErrorCode::ERROR_OMPL, "OMPL pre-approach failed: " + preres.error);
+    return report_error(ErrorCode::ERROR_OMPL, "pre-approach planning failed: " + preres.error);
   if (cancel.load())
-    return report_error(ErrorCode::ERROR_CANCELED, "canceled after OMPL");
+    return report_error(ErrorCode::ERROR_CANCELED, "canceled after pre-approach");
 
   // ---------------- phase: following (Cartesian along the edge) -----------
   if (feedback)

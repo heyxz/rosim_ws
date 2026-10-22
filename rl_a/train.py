@@ -47,6 +47,7 @@ except Exception as exc:  # pragma: no cover - environment dependent
 
 MAX_DQ = env_mod.MAX_DQ
 ENV_CLS = env_mod.PlanEnv
+BLOCKED_RATIO = 0.0
 
 
 class ArmGym(gym.Env):
@@ -55,9 +56,11 @@ class ArmGym(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, seed: int = 0, difficulty: float = 0.0, bank: str | None = None,
-                 bank_ratio: float = 0.5):
-        self.env = ENV_CLS(seed=seed, difficulty=difficulty, bank_path=bank,
-                           bank_ratio=bank_ratio)
+                 bank_ratio: float = 0.5, blocked_ratio: float = 0.0):
+        kw = dict(seed=seed, difficulty=difficulty, bank_path=bank, bank_ratio=bank_ratio)
+        if blocked_ratio > 0.0:
+            kw["blocked_ratio"] = blocked_ratio
+        self.env = ENV_CLS(**kw)
         self.observation_space = spaces.Box(-np.inf, np.inf, (self.env.obs_dim,), np.float32)
         self.action_space = spaces.Box(-1.0, 1.0, (self.env.act_dim,), np.float32)
 
@@ -73,10 +76,10 @@ class ArmGym(gym.Env):
 
 
 def make_env(rank: int, seed: int, difficulty: float, bank: str | None = None,
-             bank_ratio: float = 0.5):
+             bank_ratio: float = 0.5, blocked_ratio: float = 0.0):
     def _init():
         return Monitor(ArmGym(seed=seed + rank, difficulty=difficulty, bank=bank,
-                              bank_ratio=bank_ratio))
+                              bank_ratio=bank_ratio, blocked_ratio=blocked_ratio))
     return _init
 
 
@@ -95,9 +98,13 @@ class Curriculum(BaseCallback):
         self.rows = []
         self._t_prev = None
         self.eval_env = ENV_CLS(seed=99991, difficulty=0.0, bank_path=None)
-        # 期末评估用满难度 + 真实起点库
-        self.hard_env = ENV_CLS(seed=99992, difficulty=1.0,
-                                bank_path="scene_bank.npz", bank_ratio=1.0)
+        # 训练期间的 hard 评估：有挡路场景就评挡路场景（那才是真指标）
+        if BLOCKED_RATIO > 0:
+            self.hard_env = ENV_CLS(seed=99992, difficulty=1.0, bank_path=None,
+                                    blocked_ratio=1.0)
+        else:
+            self.hard_env = ENV_CLS(seed=99992, difficulty=1.0,
+                                    bank_path="scene_bank.npz", bank_ratio=1.0)
 
     def _on_step(self) -> bool:
         if self.num_timesteps < self.next_check:
@@ -177,6 +184,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--bank", default="scene_bank.npz",
                     help="真实起点样本库（start/goal 成对，npz）；传 '' 关闭")
+    ap.add_argument("--blocked-ratio", type=float, default=0.0,
+                    help="直线被工件挡住的场景占比（学避障必须 > 0）")
     ap.add_argument("--bank-ratio", type=float, default=0.5,
                     help="每个 episode 用样本库起点的概率")
     ap.add_argument("--env", choices=["plan", "scene"], default="plan",
@@ -189,8 +198,11 @@ def main():
     global ENV_CLS
     ENV_CLS = scene_mod.WorkpieceEnv if args.env == "scene" else env_mod.PlanEnv
     print("env:", ENV_CLS.__name__)
+    global BLOCKED_RATIO
+    BLOCKED_RATIO = args.blocked_ratio
     bank = args.bank or None
-    fns = [make_env(i, args.seed, 0.0, bank, args.bank_ratio) for i in range(args.envs)]
+    fns = [make_env(i, args.seed, 0.0, bank, args.bank_ratio, args.blocked_ratio)
+           for i in range(args.envs)]
     venv = DummyVecEnv(fns) if args.serial else SubprocVecEnv(fns)
     venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=5.0)
 
