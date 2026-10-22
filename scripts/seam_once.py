@@ -9,15 +9,22 @@ cli = ActionClient(n, FollowSeams, "/rosim_planning/follow_seams")
 if not cli.wait_for_server(15.0):
     print("action server 不可用"); sys.exit(1)
 
+import argparse
+_ap = argparse.ArgumentParser()
+_ap.add_argument("model_id")
+_ap.add_argument("--approach", type=float, default=0.08)
+_ap.add_argument("--tilt", type=float, default=0.6)
+_args, _ = _ap.parse_known_args()
+
 goal = FollowSeams.Goal()
-goal.model_id = sys.argv[1] if len(sys.argv) > 1 else "workpiece_1"
+goal.model_id = _args.model_id
 spec = SeamSpec(); spec.edge_indices = [6, 10]
 goal.seams = [spec]
 goal.time_profile = 1
 goal.seam_constant_speed = True
 goal.weld_speed = 0.020
 goal.seam_dwell = 0.0
-goal.approach_distance = 0.08
+goal.approach_distance = _args.approach
 goal.max_waypoint_spacing = 0.005
 goal.tangent_tilt = 0.6
 goal.corner_max_deviation = 0.0005

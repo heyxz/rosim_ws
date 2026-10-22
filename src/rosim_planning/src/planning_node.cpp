@@ -586,6 +586,14 @@ std::string PlanningNode::plannerLabel() const
     if (fb->lastFallback() && !fb->lastNote().empty())
       why = "（" + fb->lastNote() + "）";
   }
+  // hybrid：把"实际走了哪个分支"报出来（RL 全程无碰撞 / 前缀+修复 / 整段 OMPL）
+  if (auto* hy = dynamic_cast<const HybridPlanner*>(planner_.get()))
+    if (!hy->lastNote().empty())
+      why = "（" + hy->lastNote() + "）";
+  if (why.empty())
+    if (auto* hy = dynamic_cast<const HybridPlanner*>(planner_.get()))
+      if (!hy->lastNote().empty())
+        why = "（" + hy->lastNote() + "）";
   return who + why;
 }
 
