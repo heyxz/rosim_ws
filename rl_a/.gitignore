@@ -9,3 +9,6 @@ scene_bank.npz
 out_real/
 out_log/
 out_rail/
+out_wide/
+out_cur/
+out_cur2/

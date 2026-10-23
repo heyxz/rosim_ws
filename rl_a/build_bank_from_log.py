@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 import numpy as np
 
@@ -43,8 +44,13 @@ def main():
     rng = np.random.default_rng(3)
     goals, starts, reached, deltas = [], [], [], []
     for r in by_goal.values():
-        g6 = np.array(r["goal"])
-        s6 = np.array(r["start"])
+        # 日志里既有 6 维（只有手臂）也有 7 维（含导轨）的样本，统一成 7 维
+        g6 = np.array(r["goal"], dtype=float)
+        s6 = np.array(r["start"], dtype=float)
+        if g6.size == 7:
+            g6 = g6[1:]
+        if s6.size == 7:
+            s6 = s6[1:]
         R_goal, t_goal = kin.fk_pose(g6)
         # 导轨站位变体：同一个 TCP 位姿，让手臂在不同导轨位置重新求 IK
         variants = [(0.0, g6, s6)]
@@ -70,7 +76,7 @@ def main():
 
     # 工件位姿列：这些样本都在标称摆放上采集，所以位姿固定
     from real_scene import RealWorkpiece
-    part = RealWorkpiece("/home/xz/rosim_ws/.scratch/scene.json")
+    part = RealWorkpiece(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scene.json"))
     poses = np.tile([*part.centre0, 0.0], (len(goals), 1))
 
     np.savez(args.out, poses=poses, goals=np.array(goals), starts=np.array(starts),

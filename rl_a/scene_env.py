@@ -51,6 +51,7 @@ class WorkpieceEnv(PlanEnv):
         self._bank_goals = data["goals"]
         # 由真实调用日志生成的库会带 starts：直接用真实起点，分布才对
         self._bank_starts = data["starts"] if "starts" in data else None
+        self._bank_deltas = data["deltas"] if "deltas" in data else None
 
     # ------------------------------------------------------------------ scene
     def _sample_pose(self):
@@ -67,9 +68,22 @@ class WorkpieceEnv(PlanEnv):
         delta = (self._bank_poses - np.array([*centre, yaw])) / scale
         return self._bank_goals[int(np.argmin((delta ** 2).sum(axis=1)))].copy()
 
+    # 位移课程：难度的前半段决定"允许多大的位移"，后半段才放开工件位置。
+    # 直接学 4 rad 绕行学不动（600k 步 0%），先短后长才有梯度信号。
+    DELTA_MIN = 1.0
+    DELTA_MAX = 4.6
+
     def _bank_sample(self):
-        """有 starts 的库：随机取一条真实 (start, goal) 对。"""
-        i = int(self.rng.integers(len(self._bank_goals)))
+        """按位移课程取一条真实 (start, goal) 对。"""
+        if self._bank_deltas is None:
+            i = int(self.rng.integers(len(self._bank_goals)))
+            return self._bank_starts[i].copy(), self._bank_goals[i].copy()
+
+        limit = self.DELTA_MIN + (self.DELTA_MAX - self.DELTA_MIN) * self.difficulty
+        idx = np.flatnonzero(self._bank_deltas <= limit)
+        if idx.size == 0:
+            idx = np.array([int(np.argmin(self._bank_deltas))])
+        i = int(idx[self.rng.integers(len(idx))])
         return self._bank_starts[i].copy(), self._bank_goals[i].copy()
 
     def _ensure_blocked_pool(self, n: int = 60):

@@ -21,7 +21,7 @@ R_REAL = np.array([[0.564643, 0.0, -0.825335],
                    [0.0, 1.0, 0.0],
                    [0.825335, 0.0, 0.564643]])
 LOCAL = np.array([-0.550, 0.080, -0.091])
-PART = RealWorkpiece("/home/xz/rosim_ws/.scratch/scene.json")
+PART = RealWorkpiece(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scene.json"))
 # 标称解：真实调用返回的接近构型。工件只在小范围内移动，用它做 IK 种子
 # 几乎必然收敛；纯随机种子基本找不到（实测 720 次里只成功 1 次）。
 NOMINAL = np.load("nominal_goal.npy")
