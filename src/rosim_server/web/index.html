@@ -681,11 +681,11 @@
       <div class="inline">
         <label for="planner">规划器</label>
         <select id="planner">
-          <option value="auto">auto（直线→RL→OMPL）</option>
+          <option value="auto">auto（直线 → OMPL）</option>
           <option value="ompl">ompl</option>
           <option value="line">line（直线）</option>
-          <option value="hybrid">hybrid（RL 初解 + OMPL 修复）</option>
-          <option value="rl">rl</option>
+          <option value="hybrid">hybrid（实验：RL 初解 + OMPL 修复）</option>
+          <option value="rl">rl（实验）</option>
         </select>
         <input id="plan_trials" type="number" min="1" max="12" value="1" style="width:48px" title="规划次数：>1 时用固定目标集批量验证" />
         <button id="plan_demo" title="用当前规划器规划（次数>1 时跑固定目标集并汇报成功率）">规划演示</button>

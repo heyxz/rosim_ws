@@ -607,14 +607,15 @@ MotionPlannerPtr PlanningNode::makePlanner(const std::string& type)
   MotionPlannerPtr next;
   if (type == "auto")
   {
-    // 三段分工：先试确定性直线（可复现、3 ms 量级），直线走不了（碰撞/IK 分支
-    // 跳变）再让 RL 绕障，仍不行才用 OMPL。RL 的服务节点没起也不会卡住——
-    // RlRemotePlanner 会直接返回失败，链条继续往下走。
+    // 直线可行 → 直线（确定性、3 ms）；否则 OMPL（几何保证）。
+    //
+    // 这里**不再经过 RL**：真实请求里 94% 的直连路径本身无碰撞（直线就能解），
+    // 剩下的 6% 是需要绕行的硬场景——而那正是当前策略最不擅长的（见
+    // docs/rl_bench.md 的实测）。把 RL 放进默认链只会增加延迟和不确定性。
+    // 想试 RL 请显式选 `rl` / `hybrid`，它们仍是实验性入口。
     auto ompl = MotionPlannerFactory::create("ompl", shared_from_this(), model_);
-    auto rl = MotionPlannerFactory::create("rl", shared_from_this(), model_);
-    auto rl_chain = std::make_shared<FallbackPlanner>(rl, ompl, rl_max_delta_, get_logger());
     next = std::make_shared<FallbackPlanner>(
-        MotionPlannerFactory::create("line", shared_from_this(), model_), rl_chain, 1e9,
+        MotionPlannerFactory::create("line", shared_from_this(), model_), ompl, 1e9,
         get_logger());
   }
   else if (type == "hybrid")
