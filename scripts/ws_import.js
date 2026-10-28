@@ -2,10 +2,15 @@
 // 便携解析：优先用本机安装的 ws（npm i -g ws 或项目内 npm i ws），
 // 都找不到再回退到本机开发环境里的那份（老机器上曾经这样用过）。
 function loadWs() {
-  const candidates = [
-    "ws",
-    "/home/xz/.local/node/lib/node_modules/@deepseek-ai/dsh/node_modules/ws",
-  ];
+  const candidates = ["ws"];
+  // 全局安装（npm i -g ws）默认不在 require 路径里，需要显式拼上 npm root -g
+  try {
+    const { execSync } = require("node:child_process");
+    const root = execSync("npm root -g", { encoding: "utf8" }).trim();
+    if (root) candidates.push(root + "/ws");
+  } catch { /* npm 不可用就跳过 */ }
+  // 兜底：老开发环境里的那份
+  candidates.push(process.env.HOME + "/.local/node/lib/node_modules/@deepseek-ai/dsh/node_modules/ws");
   for (const c of candidates) {
     try { return require(c); } catch (e) { /* 下一个 */ }
   }
@@ -17,7 +22,7 @@ const ws = new WebSocket("ws://127.0.0.1:8765/");
 let sawSeams = false;
 ws.on("open", () => ws.send(JSON.stringify({
   type: "import",
-  file_path: "/home/xz/rosim_ws/src/rosim_description/meshes/workpiece_sample.step",
+  file_path: require("node:path").join(__dirname, "..", "src", "rosim_description", "meshes", "workpiece_sample.step"),
   pose: { position: { x, y, z },
           orientation: { x: 0, y: 0, z: Math.sin(yaw / 2), w: Math.cos(yaw / 2) } },
 })));
