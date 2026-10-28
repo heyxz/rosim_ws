@@ -214,39 +214,60 @@ git add -A && git commit -m "训练 out_blocked3" && git push
 
 ---
 
-## 6. 记忆怎么互通
+## 6. 记忆互通（已落地）
 
-### 6.1 现状
+共享记忆现在**在仓库里**：`docs/memory.md`（本机 `AGENTS.local.md` 是指向它的软链）。
 
-`dsh-bridge` 把最近 40 条对话摘要写进工作区的 `AGENTS.local.md`
-（`<!-- dsh-memory:start/end -->` 区块，**上限 40 条 / 12 KB**）。
-这个文件被 gitignore，所以**只在单机有效**。
+```
+飞书（笔记本 bridge） ─┐
+GUI / VSCode（任一机器）├─→ docs/memory.md ─→ git push/pull ─→ 另一端
+笔记本本地 agent ─────┘
+```
 
-### 6.2 改成仓库共享（推荐）
+- `dsh-bridge` 已改为写 `docs/memory.md`（`feishu.mjs` 第 41 行）
+- 本机 `AGENTS.local.md` → 软链 → `docs/memory.md`（agent 每轮自动读到）
+- `scripts/memory_sync.sh`：只提交/推送这个文件（不碰其他改动）
+- systemd 用户定时器 `rosim-memory-sync.timer`：**每 5 分钟**自动同步一次
 
-1. bridge 写记忆的路径改为 `docs/memory.md`（改 `feishu.mjs` 里 `new MemoryBus({path})`）
-2. 每次写入后自动提交推送：
+### 6.1 笔记本上要做的两件事
 
 ```bash
-# 在 bridge 的 MemoryBus.write 之后调用，或用一个 cron/watcher
-cd ~/rosim_ws && git add docs/memory.md \
-  && git commit -m "memory: $(date +%H:%M)" -q \
-  && git pull --rebase -q && git push -q
+cd ~/rosim_ws
+ln -sf docs/memory.md AGENTS.local.md          # 让 agent 读仓库里的记忆
+cp ~/rosim_ws/scripts/memory_sync.sh /dev/null # 已在仓库里，无需单独拷
+# 定时器（可选，但建议）
+mkdir -p ~/.config/systemd/user
+scp desktop:~/.config/systemd/user/rosim-memory-sync.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now rosim-memory-sync.timer
 ```
 
-3. 两台机器的 `AGENTS.local.md` 只留一行指向它：
+### 6.2 大小
 
-```markdown
-@docs/memory.md
-```
+硬上限 **40 条 / 12 KB**（`MemoryBus` 的滚动窗口），不会膨胀。
+长期结论写进 `docs/memory/archive.md`。
 
-### 6.3 大小
+### 6.3 冲突处理
 
-有硬上限：**40 条 / 12 KB**，不会膨胀。当前 8 KB。
-长期结论（"导轨 2.80 m""numpy 必须 1.x""RL 不承担避障"）建议另存
-`docs/memory/archive.md`，滚动窗口只放最近对话。
+两台同时改记忆时会 rebase 冲突。`memory_sync.sh` 冲突时会 abort 并提示；
+处理办法：`git checkout --theirs docs/memory.md` 或手工合并后重跑。
+因为只追加、不删改，实际冲突概率很低。
 
 ---
+
+## 6.5 在 VSCode 里对话（方案 A，与三端兼容）
+
+**VSCode 只是网页的另一个窗口**，不是第四条通道——同一个 `dsh web` 服务、同一个会话、同一份记忆：
+
+```
+Ctrl+Shift+P → "Simple Browser: Show" → http://127.0.0.1:3080
+```
+
+- 左边写代码，右边对话，历史与会话都不变
+- 三端通完全兼容：飞书（笔记本）、GUI（浏览器/VSCode）、笔记本 agent 共用 `docs/memory.md`
+- 想省事：把 `dsh web` 设为 VSCode 任务（`.vscode/tasks.json` 已带）或用 `code --goto`
+
+> 注意：`dsh web` 服务需要 `DISPLAY` 才能从 GUI 里唤起 VSCode 窗口，
+> 已写入 `~/.config/dsh-web.env`；改动后要 `systemctl --user restart dsh-web` 生效。
 
 ## 7. 常见问题
 
