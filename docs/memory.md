@@ -11,11 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-28 23:48 [GUI] agent：免密通了 ✅ 跑一下两台状态看板：
-- 2026-10-28 23:48 [GUI] agent：SSH 通了 ✅ 顺手发现笔记本上有几个**粘贴残留的垃圾文件**（`-e` 就是那次坏掉的 `sed -e` 造出来的）。我先修一下看板脚本，让它能看本机：
-- 2026-10-28 23:48 [GUI] agent：脚本被我改坏了，直接重写一份干净的：
-- 2026-10-28 23:48 [GUI] agent：看板正常 ✅ 现在收尾：清理笔记本上的粘贴垃圾 + 让两台代码对齐。 **先提交我这边的改动：**
-- 2026-10-28 23:49 [GUI] agent：笔记本的垃圾文件已经清掉了（上条命令其实执行成功）。现在把它的记忆改动丢掉、对齐到最新提交：
 - 2026-10-28 23:51 [GUI] 你：This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context …
 - 2026-10-28 23:52 [GUI] agent：`git pull` 在笔记本上**卡住了**（60 秒超时）——多半是笔记本没有**能访问 GitHub 的 SSH 密钥**。我查一下：
 - 2026-10-28 23:52 [GUI] agent：找到根因了，两个问题叠在一起： | 问题 | 证据 | | --- | --- | | 笔记本的 remote 是 **HTTPS** | `remote: https://github.com/heyxz/rosim_ws.git` | …
@@ -51,4 +46,9 @@
 - 2026-10-29 00:22 [GUI] 你：background job bash-88 (bash: sleep 200; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
 - 2026-10-29 00:22 [GUI] 你：background job bash-90 (bash: timeout 900 ssh -o BatchMode=yes laptop "printf ' ' | sudo -S -p '' DEBIAN_FRONTEND=noninteractive apt-get ins…
 - 2026-10-29 00:22 [GUI] agent：进展很大——`rosim_core` 过了。现在 `rosim_planning` 卡在安装阶段，看具体错误：
+- 2026-10-29 00:22 [GUI] agent：两个问题，其中一个是**仓库问题**：笔记本上缺 `src/rosim_planning/launch` 目录。查一下:
+- 2026-10-29 00:22 [GUI] agent：`launch` 目录在主力机上**是空的**（git 不存空目录），所以笔记本上根本没有 → `install(DIRECTORY launch)` 失败。这是仓库的真实 bug，两边都会踩。修 CMake：
+- 2026-10-29 00:23 [GUI] agent：主力机 `2.3.2`，笔记本装到了 `2.3.4`——**soname 不一致**，这是预编译件移植的典型坑。先把编译跑完，再实测能不能跑：
+- 2026-10-29 00:26 [GUI] 你：background job bash-91 (bash: sleep 240; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
+- 2026-10-29 00:26 [GUI] 你：background job bash-98 (bash: timeout 900 ssh -o BatchMode=yes laptop "cd ~/rosim_ws && git pull --rebase -q 2>&1 | tail -2; source /opt/ros…
 <!-- dsh-memory:end -->

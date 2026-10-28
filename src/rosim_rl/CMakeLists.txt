@@ -41,7 +41,11 @@ endif()
 install(TARGETS rosim_rl
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
-install(DIRECTORY include/ DESTINATION include)
+# include/ 目前为空（include/rosim_rl/ 下无文件），git 不保存空目录；
+# 换机器 clone 后不存在，install(DIRECTORY) 会报错终止。
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  install(DIRECTORY include/ DESTINATION include)
+endif()
 
 ament_export_include_directories(include)
 ament_export_libraries(rosim_rl)
