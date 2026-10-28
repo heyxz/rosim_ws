@@ -11,7 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-29 00:18 [GUI] agent：OCCT 那个 warning 在主力机上也有（正常回退）。真正缺的是 `ros-humble-octomap`：
 - 2026-10-29 00:22 [GUI] 你：background job bash-88 (bash: sleep 200; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
 - 2026-10-29 00:22 [GUI] 你：background job bash-90 (bash: timeout 900 ssh -o BatchMode=yes laptop "printf ' ' | sudo -S -p '' DEBIAN_FRONTEND=noninteractive apt-get ins…
 - 2026-10-29 00:22 [GUI] agent：进展很大——`rosim_core` 过了。现在 `rosim_planning` 卡在安装阶段，看具体错误：
@@ -51,4 +50,5 @@
 - 2026-10-29 00:46 [GUI] 你：可以，你帮我测试验证把，密码你也知道
 - 2026-10-29 00:46 [GUI] agent：开始重启验证。先记基线，然后重启、等它回来、逐项核对：
 - 2026-10-29 00:47 [GUI] agent：重启验证成功 ✅ 再等 2 分钟看记忆定时器是否自动追上（顺带验证修复后的 pull 逻辑）：
+- 2026-10-29 00:50 [GUI] agent：重启验证**全部通过**。 ## 实测记录 ``` 重启前: boot 2026-10-28 21:00 up 3h46m HEAD c6c7030 重启: 00:46:54 发出 重连: 20 秒后 SSH 恢复 重启后: boot 20…
 <!-- dsh-memory:end -->
