@@ -61,7 +61,19 @@ bash ~/rosim_ws/scripts/patch_dsh_resume.sh      # 幂等；--check 只检查
 
 ---
 
-## 4. 笔记本部署清单（按顺序做）
+## 4. 笔记本部署清单
+
+### 4.0 一条命令接入（推荐先跑）
+
+```bash
+git clone git@github.com:heyxz/smartwelding.git ~/rosim_ws && cd ~/rosim_ws
+bash scripts/setup_laptop.sh
+```
+
+它会：环境体检 → 建立共享记忆软链 → 安装"每 5 分钟同步记忆"定时器 →
+告诉你还差什么（dsh 版本 / 飞书桥 / SSH）。幂等，可反复跑。
+
+下面是逐项的细节说明。
 
 ### 4.1 环境
 
@@ -229,17 +241,21 @@ GUI / VSCode（任一机器）├─→ docs/memory.md ─→ git push/pull ─�
 - `scripts/memory_sync.sh`：只提交/推送这个文件（不碰其他改动）
 - systemd 用户定时器 `rosim-memory-sync.timer`：**每 5 分钟**自动同步一次
 
-### 6.1 笔记本上要做的两件事
+### 6.1 笔记本上要做的（已封装）
 
 ```bash
-cd ~/rosim_ws
-ln -sf docs/memory.md AGENTS.local.md          # 让 agent 读仓库里的记忆
-cp ~/rosim_ws/scripts/memory_sync.sh /dev/null # 已在仓库里，无需单独拷
-# 定时器（可选，但建议）
-mkdir -p ~/.config/systemd/user
-scp desktop:~/.config/systemd/user/rosim-memory-sync.{service,timer} ~/.config/systemd/user/
+cd ~/rosim_ws && bash scripts/setup_laptop.sh
+```
+
+等价于手动做两步：
+
+```bash
+ln -sf docs/memory.md AGENTS.local.md
+cp scripts/systemd/rosim-memory-sync.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now rosim-memory-sync.timer
 ```
+
+> systemd 单元在仓库 `scripts/systemd/` 里，用 `%h` 表示家目录，两台机器通用。
 
 ### 6.2 大小
 

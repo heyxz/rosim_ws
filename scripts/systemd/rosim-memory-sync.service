@@ -1,0 +1,8 @@
+# 跨机记忆同步（单次）：把 docs/memory.md 提交并推送
+# 用 %h 指家目录，两台机器通用
+[Unit]
+Description=rosim 跨机记忆同步（docs/memory.md → git）
+
+[Service]
+Type=oneshot
+ExecStart=%h/rosim_ws/scripts/memory_sync.sh

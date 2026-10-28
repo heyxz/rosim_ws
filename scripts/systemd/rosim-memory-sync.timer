@@ -1,0 +1,10 @@
+[Unit]
+Description=每 5 分钟同步一次跨机记忆
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=rosim-memory-sync.service
+
+[Install]
+WantedBy=timers.target
