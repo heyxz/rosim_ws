@@ -11,8 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-29 00:03 [GUI] agent：拷贝完成（185 MB，4595 个文件）✅ 现在验证笔记本能不能认出 MoveIt：
-- 2026-10-29 00:05 [GUI] agent：MoveIt 认出来了（**49 个包**，`moveit_core` 在列）✅ 但 **apt 那步还没跑**——`ros2-control`/`controller-manager`/`ompl`/`xacro`/`libocct` 全…
 - 2026-10-29 00:06 [GUI] 你：我告诉你密码你帮我安装，密码是一个空格
 - 2026-10-29 00:06 [GUI] agent：空格密码有效。开始装（后台跑，约 3~5 分钟）：
 - 2026-10-29 00:08 [GUI] 你：background job bash-76 (bash: timeout 600 ssh -o BatchMode=yes laptop "printf ' ' | sudo -S -p '' apt-get update -qq 2>&1 | tail -2; printf …
@@ -51,4 +49,6 @@
 - 2026-10-29 00:34 [GUI] agent：导入通了（`workpiece_1`），但规划失败。看具体原因：
 - 2026-10-29 00:34 [GUI] agent：规划成功但**执行失败**（`executed=0 failed=1`）。看服务端日志：
 - 2026-10-29 00:35 [GUI] agent：这不是环境问题——是**真实的运动学失败**： ``` cartesian path incomplete (fraction 0.70), relocation 1 edge follow failed: edge not fully t…
+- 2026-10-29 00:37 [GUI] agent：**3/3 全成功**（每个 37~40 秒，和主力机的 34~40 秒基本持平）——环境端到端验证通过 🎉 收尾：停掉测试服务、把 mDNS 抽风的事记进配置：
+- 2026-10-29 00:38 [GUI] agent：端到端跑通了，收尾完成。 ## 最终验证：笔记本能独立跑完整规划链路 ``` ros2 launch rosim_server server.launch.py → 8765 = 200，6 个节点 ./scripts/workpiece_…
 <!-- dsh-memory:end -->
