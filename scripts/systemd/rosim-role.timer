@@ -1,0 +1,10 @@
+[Unit]
+Description=每分钟判定一次主备角色
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=rosim-role.service
+
+[Install]
+WantedBy=timers.target

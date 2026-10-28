@@ -1,0 +1,7 @@
+# 主备角色判定：主力机在线则本机待命（只同步记忆），否则接管飞书桥
+[Unit]
+Description=rosim 主备角色判定（单次）
+
+[Service]
+Type=oneshot
+ExecStart=%h/rosim_ws/scripts/role.sh auto

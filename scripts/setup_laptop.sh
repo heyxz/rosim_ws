@@ -40,7 +40,22 @@ else
   echo "   手动执行：systemctl --user daemon-reload && systemctl --user enable --now rosim-memory-sync.timer"
 fi
 
-say "4/4 还差什么"
+say "4/5 主备切换（主力机在线则本机待命）"
+if ssh -o ConnectTimeout=3 -o BatchMode=yes "${DESKTOP_HOST:-desktop}" true 2>/dev/null; then
+  cp scripts/systemd/rosim-role.{service,timer} "$UD/" 2>/dev/null
+  if systemctl --user daemon-reload 2>/dev/null && \
+     systemctl --user enable --now rosim-role.timer 2>/dev/null; then
+    echo "✅ 已启用主备判定（每分钟）：主力机在线 → 本机停飞书桥待命；连续 2 次不可达 → 接管"
+  else
+    echo "⚠ 无法启用 rosim-role.timer（连不上 user bus）"
+  fi
+else
+  echo "⏭ 跳过：还没打通到主力机的 SSH（先做 4.4 节 ssh-copy-id）"
+  echo "   打通后执行：cp scripts/systemd/rosim-role.{service,timer} ~/.config/systemd/user/ \\"
+  echo "             && systemctl --user daemon-reload && systemctl --user enable --now rosim-role.timer"
+fi
+
+say "5/5 还差什么"
 echo "· dsh 版本（两台必须一致）："
 printf "   本机: %s\n" "$(dsh --version 2>/dev/null | head -1 || echo '未安装')"
 echo "    若与主力机不一致：npm i -g @deepseek-ai/dsh@0.2.0-rc.2 && bash scripts/patch_dsh_resume.sh"
