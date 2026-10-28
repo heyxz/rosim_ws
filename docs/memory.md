@@ -11,10 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-29 00:22 [GUI] 你：background job bash-88 (bash: sleep 200; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
-- 2026-10-29 00:22 [GUI] 你：background job bash-90 (bash: timeout 900 ssh -o BatchMode=yes laptop "printf ' ' | sudo -S -p '' DEBIAN_FRONTEND=noninteractive apt-get ins…
-- 2026-10-29 00:22 [GUI] agent：进展很大——`rosim_core` 过了。现在 `rosim_planning` 卡在安装阶段，看具体错误：
-- 2026-10-29 00:22 [GUI] agent：两个问题，其中一个是**仓库问题**：笔记本上缺 `src/rosim_planning/launch` 目录。查一下:
 - 2026-10-29 00:22 [GUI] agent：`launch` 目录在主力机上**是空的**（git 不存空目录），所以笔记本上根本没有 → `install(DIRECTORY launch)` 失败。这是仓库的真实 bug，两边都会踩。修 CMake：
 - 2026-10-29 00:23 [GUI] agent：主力机 `2.3.2`，笔记本装到了 `2.3.4`——**soname 不一致**，这是预编译件移植的典型坑。先把编译跑完，再实测能不能跑：
 - 2026-10-29 00:26 [GUI] 你：background job bash-91 (bash: sleep 240; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
@@ -51,4 +47,8 @@
 - 2026-10-29 00:46 [GUI] agent：开始重启验证。先记基线，然后重启、等它回来、逐项核对：
 - 2026-10-29 00:47 [GUI] agent：重启验证成功 ✅ 再等 2 分钟看记忆定时器是否自动追上（顺带验证修复后的 pull 逻辑）：
 - 2026-10-29 00:50 [GUI] agent：重启验证**全部通过**。 ## 实测记录 ``` 重启前: boot 2026-10-28 21:00 up 3h46m HEAD c6c7030 重启: 00:46:54 发出 重连: 20 秒后 SSH 恢复 重启后: boot 20…
+- 2026-10-29 00:52 [GUI] 你：你总结一下明天要做的事
+- 2026-10-29 00:52 [GUI] agent：当前 `247b9d7`，工作区干净。明天的事按**优先级**排，你按时间挑。 --- ## P0 · 收尾（10 分钟，建议一开机就做） | # | 事项 | 命令 | 为什么 | | --- | --- | --- | --- | | …
+- 2026-10-29 00:54 [GUI] 你：ok，晚安主力机小屁
+- 2026-10-29 00:54 [GUI] agent：晚安 🌙 「主力机小屁」我收下了，虽然它今晚确实被笔记本抢了不少活。 ## 今晚的战果 **修掉了 6 个真问题**（都不是配置笔误，是设计/仓库缺陷）： | 问题 | 类型 | | --- | --- | | 空目录导致换机器编译必挂（…
 <!-- dsh-memory:end -->
