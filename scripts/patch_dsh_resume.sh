@@ -8,7 +8,16 @@
 # dsh-bridge 依赖它把持久化会话从磁盘恢复。升级 dsh 后补丁会丢，需要重打。
 set +u
 
-TARGET="$(npm root -g 2>/dev/null)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/lib/index.js"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# dsh-bridge 自带一个补丁脚本，锚点同时兼容 0.2.0 / 0.2.1（推荐用它）
+BRIDGE_PATCH="$ROOT/dsh-bridge/tools/patch-sdk-resume.mjs"
+if [ -f "$BRIDGE_PATCH" ] && command -v node >/dev/null; then
+  echo "使用 dsh-bridge 自带补丁脚本：$BRIDGE_PATCH"
+  exec node "$BRIDGE_PATCH" "$@"
+fi
+
+TARGET="${DSH_SDK_FILE:-$(npm root -g 2>/dev/null)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/lib/index.js}"
 if [ ! -f "$TARGET" ]; then
   echo "找不到 $TARGET"; echo "先确认已安装 dsh：npm i -g @deepseek-ai/dsh@<版本>"; exit 1
 fi
@@ -31,10 +40,18 @@ if not m:
 indent = m.group(1)
 src = src.replace(m.group(0), f'{indent}case "session/resume": return this.resumeSession(params);' + m.group(0), 1)
 
-# 2) 在 shutdown 方法之前插入 resumeSession 实现
-m2 = re.search(r'\n([ \t]*)async shutdown\s*\(', src)
+# 2) 找方法插入点：优先 hasAdapterFor（0.2.1+），其次 shutdown（0.2.0）
+m2 = None
+for pat in (r'\n([ \t]*)hasAdapterFor\s*\(', r'\n([ \t]*)async shutdown\s*\(', r'\n([ \t]*)shutdown\s*\('):
+    m2 = re.search(pat, src)
+    if m2:
+        break
 if not m2:
-    sys.exit("找不到 async shutdown 锚点，请人工处理")
+    sys.exit("""找不到插入锚点（hasAdapterFor / shutdown 都不在）。
+两种处理：
+  1) 先把 dsh-bridge 解包到 ~/rosim_ws/dsh-bridge（它有自带补丁脚本，兼容性更好）
+  2) 或直接跳过补丁：bridge 恢复会话失败时会自动改用新会话，
+     上下文仍由 docs/memory.md 保证（只是飞书聊天会开新会话）""")
 indent2 = m2.group(1)
 method = f'''
 {indent2}/** dsh-bridge 补丁：从磁盘恢复已持久化的会话并在本进程继续。 */

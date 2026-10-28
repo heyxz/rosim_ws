@@ -93,7 +93,14 @@ cd ~/rosim_ws && bash scripts/check_env.sh
 ```bash
 # dsh（版本要与主力机一致）
 npm i -g @deepseek-ai/dsh@0.2.0-rc.2
-bash ~/rosim_ws/scripts/patch_dsh_resume.sh
+
+# ⚠ 补丁必须在"解包 dsh-bridge 之后"再打：
+#   dsh-bridge 自带 tools/patch-sdk-resume.mjs，锚点同时兼容 0.2.0 / 0.2.1；
+#   仓库里的 scripts/patch_dsh_resume.sh 会自动优先调用它。
+tar xzf ~/dsh-bridge.tgz -C ~/rosim_ws
+(cd ~/rosim_ws/dsh-bridge && npm install)
+node ~/rosim_ws/dsh-bridge/tools/patch-sdk-resume.mjs --check   # 应输出"未打补丁"
+node ~/rosim_ws/dsh-bridge/tools/patch-sdk-resume.mjs           # 打补丁
 
 # bridge 目录（被 gitignore，从主力机拷）
 # 主力机上执行：
