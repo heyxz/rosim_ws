@@ -11,9 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-28 23:46 [GUI] 你：笔记本跑完了
-- 2026-10-28 23:47 [GUI] agent：进展：笔记本的 sshd 起来了，但我这边还进不去——**笔记本上还没有主力机的公钥**（`Permission denied (publickey,password)`）。 两种做法，任选其一。 ## 做法 A（推荐，一条命令） **在主…
-- 2026-10-28 23:48 [GUI] 你：做法a完成了
 - 2026-10-28 23:48 [GUI] agent：免密通了 ✅ 跑一下两台状态看板：
 - 2026-10-28 23:48 [GUI] agent：SSH 通了 ✅ 顺手发现笔记本上有几个**粘贴残留的垃圾文件**（`-e` 就是那次坏掉的 `sed -e` 造出来的）。我先修一下看板脚本，让它能看本机：
 - 2026-10-28 23:48 [GUI] agent：脚本被我改坏了，直接重写一份干净的：
@@ -51,4 +48,7 @@
 - 2026-10-29 00:18 [GUI] 你：background job bash-85 (bash: sleep 180; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
 - 2026-10-29 00:18 [GUI] 你：background job bash-87 (bash: timeout 600 ssh -o BatchMode=yes laptop "printf ' ' | sudo -S -p '' DEBIAN_FRONTEND=noninteractive apt-get ins…
 - 2026-10-29 00:18 [GUI] agent：OCCT 那个 warning 在主力机上也有（正常回退）。真正缺的是 `ros-humble-octomap`：
+- 2026-10-29 00:22 [GUI] 你：background job bash-88 (bash: sleep 200; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
+- 2026-10-29 00:22 [GUI] 你：background job bash-90 (bash: timeout 900 ssh -o BatchMode=yes laptop "printf ' ' | sudo -S -p '' DEBIAN_FRONTEND=noninteractive apt-get ins…
+- 2026-10-29 00:22 [GUI] agent：进展很大——`rosim_core` 过了。现在 `rosim_planning` 卡在安装阶段，看具体错误：
 <!-- dsh-memory:end -->

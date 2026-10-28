@@ -99,7 +99,11 @@ install(TARGETS home_probe ik_probe edge_scan traverse_probe acm_probe RUNTIME D
 # regression harness (python, no build step needed)
 install(PROGRAMS tools/edge_regress DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+# launch/ 目前为空且未被 git 跟踪（git 不保存空目录）；换机器 clone 后不存在，
+# 因此加存在性判断，避免 ament_cmake_symlink_install_directory() 报错。
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/launch)
+  install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+endif()
 
 ament_export_include_directories(include)
 ament_export_libraries(rosim_planning_core)
