@@ -65,6 +65,10 @@ say "5/5 安装 systemd 单元"
 UD="$HOME/.config/systemd/user"; mkdir -p "$UD"
 run cp "$BRIDGE/dsh-bridge.service" "$UD/dsh-bridge.service"
 run sed -i "s#/home/xz/rosim_ws#${ROOT}#g" "$UD/dsh-bridge.service"
+# PATH 行原本写死 /home/xz/.local/node/bin，换机后不存在 → 找不到 dsh；
+# 改成"本机 node 所在目录"，systemd 子进程才找得到 dsh。
+NODE_BIN="$(dirname "$(command -v node 2>/dev/null || echo /usr/bin/node)")"
+run sed -i "s#^Environment=PATH=.*#Environment=PATH=${NODE_BIN}:/usr/local/bin:/usr/bin:/bin#" "$UD/dsh-bridge.service"
 run systemctl --user daemon-reload
 echo "已写入 $UD/dsh-bridge.service"
 grep -E "^(WorkingDirectory|ExecStart|Environment=DSH_HOME)" "$UD/dsh-bridge.service" | sed 's/^/  /'
