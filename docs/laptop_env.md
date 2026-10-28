@@ -118,3 +118,53 @@ rsync -a 主力机:~/rosim_ws/.pylibs ~/rosim_ws/
 ```
 
 libtorch（C++ 侧）默认关闭（`ROSIM_WITH_TORCH=OFF`），不影响 OMPL/直线规划。
+
+## 两台机器的版本差异（2026-10-29 实测 diff）
+
+**完全相同**：gcc 11.4.0 / cmake 3.22.1 / python 3.10 / ROS humble / ompl 1.7.0 /
+eigen 3.4.0 / boost 1.74 / occt 7.5.1 / vtk 9.1.0 / qt 5.15.3 / xacro 2.1.1 /
+robot_state_publisher 3.0.3
+
+**笔记本更高**（apt 镜像取自更新日期，主力机是早先装的）：
+
+| 包 | 主力机 | 笔记本 | 影响面 |
+| --- | --- | --- | --- |
+| rclcpp | 16.0.16 | 16.0.21 | 补丁级，无感 |
+| ros2-control | 2.52.2 | 2.54.3 | 控制器行为/时序可能有细微差别 |
+| controller-manager | 2.52.2 | 2.54.3 | 同上 |
+| joint-trajectory-controller | 2.50.2 | 2.54.1 | 同上 |
+| joint-state-broadcaster | 2.50.2 | 2.54.1 | 同上 |
+| geometric-shapes | 2.3.2 | 2.3.4 | **本机手工补了 2.3.2 的 so** |
+| tf2-eigen | 0.25.17 | 0.25.24 | 补丁级 |
+| node | 22.23.3 | 22.23.4 | 补丁级 |
+
+### 风险判断
+
+1. **我们自己的代码不直接 `find_package(ros2_control)`**，只在 launch 里用控制器 →
+   版本差异体现在「轨迹执行」环节，可能让同一轨迹的时间参数化略有不同。
+2. **geometric-shapes 是唯一的混合态**：编译用 2.3.4 头文件，MoveIt 运行时加载
+   2.3.2 的库。实测 3/3 通过，但理论上如果两版改了 inline 函数或结构体布局，
+   会出现难查的运行时错误。
+3. **RL 相关完全不可验证**：笔记本没有 `.pylibs`（torch/sb3/onnx 全缺）。
+
+### 如果要严格一致
+
+```bash
+# 主力机导出可复现的版本清单
+dpkg-query -W -f='${Package}=${Version}\n' \
+  'ros-humble-*' 'libocct-*' 'libfcl-dev' 'liboctomap-dev' > versions.lock
+# 笔记本按清单装（旧版本可能已从镜像移除，那就只能统一到"新版本"）
+```
+
+实话：**目前做不到完全一致**——apt 镜像上旧版本已被替换（实测 2.3.2 已无法安装）。
+现实策略是「**主力机为准，笔记本做冒烟**」，并接受上面第 2 条的风险。
+
+## 记忆同步（实测修复）
+
+`scripts/memory_sync.sh` 早期版本有缺陷：**本机无改动就 `exit`，从不 `pull`**，
+导致被动方永远停在旧版本（实测差 1 个提交，且会一直差下去）。
+
+现已改为：`pull --rebase --autostash` → 有改动则提交 → 再 pull → push。
+两台每 5 分钟各自对齐一次，实测收敛到同一提交。
+
+记忆规模：40 条 / 约 7 KB（硬上限 40 条 / 12 KB，不会膨胀）。
