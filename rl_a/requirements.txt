@@ -1,16 +1,23 @@
-# RL 训练 / 策略推理依赖（Python 3.10）
-# 安装：python3 -m pip install --target ../.pylibs -r requirements.txt
-# GPU（CUDA 12.4）版 torch 请单独装：
+# RL 训练 / 策略推理依赖
+#
+# 安装（装到仓库内的 .pylibs，不污染系统 Python）：
+#   python3 -m pip install --target ../.pylibs -r requirements.txt
+#
+# GPU 版 torch（CUDA 12.4）单独装：
 #   python3 -m pip install --target ../.pylibs \
 #     --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0
 #
-# 版本取自开发机 .pylibs 实测（2026-10-28）
+# 版本以"开发机实际导入生效的版本"为准（2026-10-28 实测），
+# 不是 pip 里的最新版——开发机的 .pylibs 曾重复安装，元数据会误导。
+#
+# ⚠️ numpy 必须锁在 1.x：torch 2.6 / sb3 2.3 的二进制是按 numpy 1.x ABI 编的，
+#    升到 numpy 2.x 会报 "numpy.dtype size changed" 或直接 import 失败。
 torch==2.6.0
-stable-baselines3==2.9.0
-onnx==1.23.2
+stable-baselines3==2.3.2
+gymnasium==0.29.1
+numpy==1.26.4
+onnx==1.16.2
 onnxruntime==1.23.2
-numpy==2.2.6
-gymnasium==1.4.0
 pandas==2.3.3
-tensorboard==2.21.0
+tensorboard>=2.11
 matplotlib>=3.5
