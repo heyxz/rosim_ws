@@ -316,6 +316,45 @@ journalctl --user -u dsh-bridge -n 5 --no-pager     # 应看到「闸门：…�
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3080/   # 401 = 正常（需 token）
 ```
 
+
+### 5.7 主备切换实测记录（2026-10-29）
+
+#### 坑一：笔记本桥起不来（已修）
+
+现象：主力机关机后，笔记本判定"本机应值班"并启动桥，但桥**反复崩溃 12 次**，
+飞书消息无人应答。
+
+```
+00:58:18  role.sh: 主力机连续 3 次不可达 → 本机接管（值班）
+00:58:58  dsh-bridge.service: Main process exited, code=exited, status=1/FAILURE
+```
+
+根因：`feishu.mjs` 会 `spawn dsh`，而 unit 的 `PATH` 写死为主力机路径
+`/home/xz/.local/node/bin`；笔记本的 `dsh` 在 `~/.npm-global/bin` →
+`spawn dsh ENOENT` → exit 1 → `Restart=on-failure` 无限重启。
+
+修复：`setup_bridge.sh` 用 `dirname $(command -v dsh)` 探测并写进 `PATH`。
+
+#### 坑二：手动验证后的残留状态
+
+测试时若用 `role.sh laptop` 强制值班，测完必须 `role.sh clear` + 手动停桥，
+否则会和主力机形成**双桥双回**。
+
+#### 完整自动接管实测（修好后）
+
+模拟主力机不可达（临时移走 `~/.ssh/known_hosts`，不动网络）：
+
+```
+01:17:44  主力机不可达（1/2），暂不接管
+01:18:59  主力机连续 2 次不可达 → 本机接管（值班）
+01:18:59  桥: 已启动（本机值班）
+01:18:59  闸门：本机应值班（第 1 次检查）→ 启动飞书桥
+01:19:02  [feishu] 长连接已就绪
+```
+
+**从不可达到能回飞书 ≈ 3 分钟**（2 个探测周期 + 闸门 + 建立长连接）。
+随后飞书提问"你在哪台机器"，笔记本正确回答——端到端闭环。
+
 ## 6. 记忆互通（已落地）
 
 共享记忆现在**在仓库里**：`docs/memory.md`（本机 `AGENTS.local.md` 是指向它的软链）。
