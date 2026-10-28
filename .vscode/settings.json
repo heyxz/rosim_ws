@@ -1,0 +1,44 @@
+{
+  // 这个仓库里有 .pylibs(3.3 万文件)/build/install/log，VSCode 递归监听会把
+  // inotify 配额吃光，watcher 进程被杀后主进程 SIGSEGV 崩溃（实测 2026-10-28）。
+  // 下面三组排除是防崩溃的关键，别删。
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.pylibs/**": true,
+    "**/build/**": true,
+    "**/install/**": true,
+    "**/log/**": true,
+    "**/.scratch/**": true,
+    "**/dsh-bridge/node_modules/**": true,
+    "**/dsh-bridge/.dsh-bridge-home/**": true,
+    "**/node_modules/**": true,
+    "**/*.log": true
+  },
+  "search.exclude": {
+    "**/.pylibs": true,
+    "**/build": true,
+    "**/install": true,
+    "**/log": true,
+    "**/.scratch": true,
+    "**/node_modules": true,
+    "**/*.log": true
+  },
+  "files.exclude": {
+    "**/.pylibs": true,
+    "**/.scratch": true
+  },
+
+  // C++：用 compile_commands.json 让 IntelliSense 认识 ROS/MoveIt 头文件
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/rosim_core/compile_commands.json,${workspaceFolder}/build/rosim_interfaces/compile_commands.json,${workspaceFolder}/build/rosim_planning/compile_commands.json,${workspaceFolder}/build/rosim_rl/compile_commands.json,${workspaceFolder}/build/rosim_server/compile_commands.json,${workspaceFolder}/build/rosim_viewer/compile_commands.json",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.intelliSenseEngine": "default",
+
+  // Python：训练/脚本目录
+  "python.analysis.extraPaths": ["${workspaceFolder}/rl_a", "${workspaceFolder}/scripts"],
+  "python.terminal.activateEnvironment": false,
+
+  "cmake.configureOnOpen": false,
+  "cmake.sourceDirectory": "${workspaceFolder}/src",
+  "telemetry.telemetryLevel": "off"
+}

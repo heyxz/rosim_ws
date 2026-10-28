@@ -1,0 +1,55 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "① 打开对话界面（Simple Browser）",
+      "detail": "在 VSCode 标签页里打开 dsh web 界面（先确保 dsh-web 服务在跑）",
+      "type": "shell",
+      "command": "echo '在 VSCode 里按 Ctrl+Shift+P → 输入 Simple Browser: Show → 填 http://127.0.0.1:3080'; curl -s -o /dev/null -w 'dsh-web: %{http_code}\\n' http://127.0.0.1:3080/ || echo '服务未运行：systemctl --user start dsh-web'",
+      "problemMatcher": []
+    },
+    {
+      "label": "② 启动 ROS 服务（rosim-server）",
+      "type": "shell",
+      "command": "systemctl --user start rosim-server && sleep 3 && curl -s -o /dev/null -w '8765: %{http_code}\\n' http://127.0.0.1:8765/",
+      "problemMatcher": []
+    },
+    {
+      "label": "环境体检",
+      "type": "shell",
+      "command": "bash scripts/check_env.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "编译（symlink-install）",
+      "type": "shell",
+      "command": "source /opt/ros/humble/setup.bash && source $HOME/ws_moveit/install/setup.bash 2>/dev/null; colcon build --symlink-install --parallel-workers $(nproc) --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "冒烟：1 个位姿",
+      "type": "shell",
+      "command": "./scripts/workpiece_bench.sh 1 auto",
+      "problemMatcher": []
+    },
+    {
+      "label": "基准：8 个位姿",
+      "type": "shell",
+      "command": "./scripts/workpiece_bench.sh 8 auto",
+      "problemMatcher": []
+    },
+    {
+      "label": "五规划器对比",
+      "type": "shell",
+      "command": "source /opt/ros/humble/setup.bash && source install/setup.bash 2>/dev/null; python3 scripts/benchmark_suite.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "VSCode 崩溃诊断",
+      "type": "shell",
+      "command": "bash scripts/vscode_doctor.sh",
+      "problemMatcher": []
+    }
+  ]
+}
