@@ -12,7 +12,7 @@
 ## 0. 第一步永远是体检
 
 ```bash
-git clone git@github.com:heyxz/smartwelding.git ~/rosim_ws
+git clone git@github.com:heyxz/rosim_ws.git ~/rosim_ws
 cd ~/rosim_ws
 bash scripts/check_env.sh          # 只读，不装任何东西
 ```

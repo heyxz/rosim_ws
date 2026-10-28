@@ -66,7 +66,7 @@ bash ~/rosim_ws/scripts/patch_dsh_resume.sh      # 幂等；--check 只检查
 ### 4.0 一条命令接入（推荐先跑）
 
 ```bash
-git clone git@github.com:heyxz/smartwelding.git ~/rosim_ws && cd ~/rosim_ws
+git clone git@github.com:heyxz/rosim_ws.git ~/rosim_ws && cd ~/rosim_ws
 bash scripts/setup_laptop.sh
 ```
 
@@ -80,7 +80,7 @@ bash scripts/setup_laptop.sh
 按 [docs/install.md](install.md) 走，先体检：
 
 ```bash
-git clone git@github.com:heyxz/smartwelding.git ~/rosim_ws
+git clone git@github.com:heyxz/rosim_ws.git ~/rosim_ws
 cd ~/rosim_ws && bash scripts/check_env.sh
 ```
 
