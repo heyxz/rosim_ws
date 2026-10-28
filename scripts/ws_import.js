@@ -1,5 +1,17 @@
 // 用法: node scripts/ws_import.js x y z yaw  → 导入工件并打印模型 id（workpiece_N）
-const WebSocket = require("/home/xz/.local/node/lib/node_modules/@deepseek-ai/dsh/node_modules/ws");
+// 便携解析：优先用本机安装的 ws（npm i -g ws 或项目内 npm i ws），
+// 都找不到再回退到本机开发环境里的那份（老机器上曾经这样用过）。
+function loadWs() {
+  const candidates = [
+    "ws",
+    "/home/xz/.local/node/lib/node_modules/@deepseek-ai/dsh/node_modules/ws",
+  ];
+  for (const c of candidates) {
+    try { return require(c); } catch (e) { /* 下一个 */ }
+  }
+  throw new Error("缺少 ws 模块：请先运行 npm install -g ws（或在本目录 npm i ws）");
+}
+const WebSocket = loadWs();
 const [x, y, z, yaw] = process.argv.slice(2).map(Number);
 const ws = new WebSocket("ws://127.0.0.1:8765/");
 let sawSeams = false;

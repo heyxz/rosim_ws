@@ -6,6 +6,8 @@ STEP 工件导入 → 在浏览器里建焊缝 → 6 轴 MOTOMAN-GP12 + 第 7 �
 - 完整设计、目录说明、协议与算法细节：**[src/README.md](src/README.md)**
 - 代码地图（哪个功能在哪个文件）：**[docs/code_map.md](docs/code_map.md)**
 - OMPL vs RL 对比数据：**[docs/rl_bench.md](docs/rl_bench.md)**
+- 落地路线与里程碑：**[docs/roadmap.md](docs/roadmap.md)**
+- 换台电脑装环境（依赖+版本+坑）：**[docs/install.md](docs/install.md)**
 - 代码位于 `src/`（7 个 ROS 2 包）
 - 依赖：ROS 2 Humble、MoveIt2、OpenCASCADE 7.5、VTK 9.1、Qt5（仅旧版桌面 GUI）
 

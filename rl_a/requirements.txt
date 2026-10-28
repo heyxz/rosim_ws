@@ -1,0 +1,16 @@
+# RL 训练 / 策略推理依赖（Python 3.10）
+# 安装：python3 -m pip install --target ../.pylibs -r requirements.txt
+# GPU（CUDA 12.4）版 torch 请单独装：
+#   python3 -m pip install --target ../.pylibs \
+#     --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0
+#
+# 版本取自开发机 .pylibs 实测（2026-10-28）
+torch==2.6.0
+stable-baselines3==2.9.0
+onnx==1.23.2
+onnxruntime==1.23.2
+numpy==2.2.6
+gymnasium==1.4.0
+pandas==2.3.3
+tensorboard==2.21.0
+matplotlib>=3.5
