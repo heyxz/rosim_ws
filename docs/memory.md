@@ -11,8 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-28 21:39 [GUI] agent：文件监听器已经**被杀掉**了（`fileWatcher: crashed with code 15, reason 'killed'`）——这和崩溃签名吻合。看崩转储确认：
-- 2026-10-28 21:39 [GUI] agent：**根因基本确定**：`Signal: 11`（SIGSEGV），崩之前 `fileWatcher` 进程先被杀（`code 15`）。这个仓库有 **33k 个 `.pylibs` 文件 + build/log**，VSCode 递归监听…
 - 2026-10-28 21:39 [GUI] agent：构建完成（6 个包都有 `compile_commands.json`）。现在**实测验证**：用独立配置目录启动一次，看还会不会崩：
 - 2026-10-28 21:40 [GUI] agent：查清了，**是 VSCode 自己崩了（SIGSEGV），不是工程配置报错**。已修复并推送（`330f787`）。 ## 崩溃链 ``` 打开 /home/xz/rosim_ws → fileWatcher 递归监听这个仓库 → 仓库里有…
 - 2026-10-28 21:43 [GUI] 你：现在是在你ui右上角点用vscode打开没反映了
@@ -51,4 +49,6 @@
 - 2026-10-28 22:29 [GUI] agent：已修好，现在 remote 回到了能用的地址： ``` origin git@github.com:heyxz/smartwelding.git ✅ fetch 正常 ``` ## 问题出在哪 ```bash git@github.com:…
 - 2026-10-28 22:29 [GUI] 你：远程改名完成了
 - 2026-10-28 22:29 [GUI] agent：名字你没说，我直接问 GitHub 的 API 查一下重定向到哪：
+- 2026-10-28 22:30 [GUI] 你：远程新名字rosim_ws
+- 2026-10-28 22:30 [GUI] agent：改名完成，已推送到新仓库 ✅ ## 这台主力机已完成 ``` remote git@github.com:heyxz/rosim_ws.git （fetch/push 都正常） 推送 55f92a1..11ce197 → heyxz/ros…
 <!-- dsh-memory:end -->
