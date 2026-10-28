@@ -274,6 +274,48 @@ git add -A && git commit -m "训练 out_blocked3" && git push
 
 ---
 
+
+## 5.6 开机自启（两台都配好了，2026-10-29）
+
+| 服务 | 主力机 | 笔记本 | 说明 |
+| --- | --- | --- | --- |
+| `dsh-web`（harness GUI, :3080） | enabled / active | enabled / active | 登录即可用；工作目录是 `~/rosim_ws` |
+| `dsh-bridge`（飞书桥） | enabled / active | enabled / **闸门待命** | 见下 |
+| `rosim-role.timer` | 未装 | enabled / active | 只有笔记本需要判主备 |
+| `rosim-memory-sync.timer` | enabled | enabled | 每 5 分钟 |
+| `loginctl Linger` | — | **yes** | 未登录也会跑用户服务 |
+
+### 桥为什么"enabled 但不一定在跑"
+
+直接 enabled 会让开机的笔记本立刻连飞书；若主力机也在线 → **两台同时回消息**。
+所以桥单元的 ExecStart 是 `scripts/bridge_gate.sh`：
+
+```
+开机 → 闸门每 10 秒问一次 role.sh is-active
+        主力机可达  → 继续待命（unit 记 active 但在等）
+        主力机不可达 → 立刻 exec 真桥（约 10 秒接管）
+        等满 10 分钟仍待命 → 退出，交给 rosim-role.timer 后续接管
+```
+
+### 笔记本曾经踩过的坑
+
+`dsh-web.service` 原先指向 `/home/xz/smartweld/deploy/dsh-web-run.sh`，而那个目录
+**已被删进回收站**（实际进程 cwd 是 `~/.local/share/Trash/files/smartweld`）。
+服务显示 active 是因为进程还在；**一旦重启就彻底起不来**。现已改为：
+
+```ini
+WorkingDirectory=/home/xz/rosim_ws
+ExecStart=/home/xz/.npm-global/bin/dsh --profile web --no-open
+```
+
+### 重启后的自检
+
+```bash
+systemctl --user is-active dsh-web dsh-bridge
+journalctl --user -u dsh-bridge -n 5 --no-pager     # 应看到「闸门：…」日志
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3080/   # 401 = 正常（需 token）
+```
+
 ## 6. 记忆互通（已落地）
 
 共享记忆现在**在仓库里**：`docs/memory.md`（本机 `AGENTS.local.md` 是指向它的软链）。
