@@ -27,6 +27,15 @@ else
   echo "✅ 已建立：AGENTS.local.md -> docs/memory.md"
 fi
 
+say "2.5/4 git 身份"
+if ! git config --global user.email >/dev/null 2>&1; then
+  git config --global user.name "heyxz"
+  git config --global user.email "124697555@qq.com"
+  echo "✅ 已设置 git 身份（缺失时记忆同步定时器会提交失败、暂存区堆积、pull 被阻止）"
+else
+  echo "✅ 已存在：$(git config --global user.name) / $(git config --global user.email)"
+fi
+
 say "3/4 记忆同步定时器"
 UD="$HOME/.config/systemd/user"
 mkdir -p "$UD"
