@@ -137,6 +137,9 @@ source install/setup.bash
 | Boost | 1.74.0 | `libboost-dev` `libboost-system-dev` |
 | tinyxml2 | 9.0.0 | URDF/SRDF 解析 |
 | console-bridge | 1.0.1 | 日志 |
+| OpenCASCADE (occt) | **7.5.1** | STEP 导入 / 边提取（`rosim_core`） |
+| VTK | **9.1.0** | 可视化库 `librosim_viz`（仅 viewer 用） |
+| Qt5 | 5.15.3 | 旧版桌面 GUI（`rosim_viewer`，可跳过） |
 | Python | **3.10.12** | 脚本与训练侧 |
 
 ---
