@@ -63,5 +63,10 @@ case "${1:-status}" in
       fi
     fi
     ;;
-  *) echo "用法: role.sh {status|auto|desktop|laptop|clear}"; exit 1 ;;
+  is-active)   # 只判断不动手：本机该不该值班？（0=该，1=不该）
+    if [ -f "$OVERRIDE" ]; then
+      [ "$(cat "$OVERRIDE")" = laptop ] && exit 0 || exit 1
+    fi
+    probe_desktop && exit 1 || exit 0 ;;
+  *) echo "用法: role.sh {status|auto|desktop|laptop|clear|is-active}"; exit 1 ;;
 esac

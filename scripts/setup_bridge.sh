@@ -68,6 +68,9 @@ run sed -i "s#/home/xz/rosim_ws#${ROOT}#g" "$UD/dsh-bridge.service"
 # PATH 行原本写死 /home/xz/.local/node/bin，换机后不存在 → 找不到 dsh；
 # 改成"本机 node 所在目录"，systemd 子进程才找得到 dsh。
 NODE_BIN="$(dirname "$(command -v node 2>/dev/null || echo /usr/bin/node)")"
+# ExecStart 走启动闸门：开机自启但主力机在线时不连飞书（避免两台同时回消息）
+GATE="$ROOT/scripts/bridge_gate.sh"
+run sed -i "s#^ExecStart=.*#ExecStart=${GATE}#" "$UD/dsh-bridge.service"
 run sed -i "s#^Environment=PATH=.*#Environment=PATH=${NODE_BIN}:/usr/local/bin:/usr/bin:/bin#" "$UD/dsh-bridge.service"
 run systemctl --user daemon-reload
 echo "已写入 $UD/dsh-bridge.service"
