@@ -11,10 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-28 23:52 [GUI] agent：找到根因了，两个问题叠在一起： | 问题 | 证据 | | --- | --- | | 笔记本的 remote 是 **HTTPS** | `remote: https://github.com/heyxz/rosim_ws.git` | …
-- 2026-10-28 23:52 [GUI] agent：就差这一步：**把笔记本的公钥加到 GitHub**。 ## 你要做的（约 30 秒，网页操作） 1. 打开 https://github.com/settings/keys 2. 点 **New SSH key** 3. Title 随便…
-- 2026-10-28 23:54 [GUI] 你：添加好了
-- 2026-10-28 23:54 [GUI] agent：GitHub 认证通了 ✅ 现在把笔记本对齐并验证定时器：
 - 2026-10-28 23:55 [GUI] agent：全部打通了 🎉 两台现在都在 `909c35b`，工作区干净。 ## 最终状态 ``` ──────── 主力机 (xz) ──────── 飞书桥: active ← 值班 记忆同步: active（每 5 分钟） GPU: 5%, 6…
 - 2026-10-28 23:56 [GUI] 你：现在看下笔记本上的开发环境问题，好像还是不全
 - 2026-10-28 23:56 [GUI] agent：我直接在笔记本上跑体检脚本，把结果拿回来看：
@@ -51,4 +47,8 @@
 - 2026-10-29 00:26 [GUI] 你：background job bash-98 (bash: timeout 900 ssh -o BatchMode=yes laptop "cd ~/rosim_ws && git pull --rebase -q 2>&1 | tail -2; source /opt/ros…
 - 2026-10-29 00:26 [GUI] agent：`rosim_planning` 过了 ✅ 下一个是 `rosim_rl`——大概率同类问题：
 - 2026-10-29 00:26 [GUI] agent：同类问题：`rosim_rl/include/` 也是空目录。**系统性扫一遍**，一次修完：
+- 2026-10-29 00:29 [GUI] 你：background job bash-105 (bash: timeout 900 ssh -o BatchMode=yes laptop "cd ~/rosim_ws && git pull --rebase -q 2>&1 | tail -2; source /opt/ro…
+- 2026-10-29 00:29 [GUI] 你：background job bash-99 (bash: sleep 240; timeout 25 ssh -o BatchMode=yes laptop 'cd ~/rosim_ws && ls install 2>/dev/null | tr "\n" " "; echo…
+- 2026-10-29 00:30 [GUI] agent：编译**全部通过**（7 个包）✅ 现在验最关键的：预编译 MoveIt 在运行时能不能加载（soname 差异）：
+- 2026-10-29 00:30 [GUI] agent：确认撞上 ABI 墙：`libgeometric_shapes.so.2.3.2` 找不到（笔记本是 2.3.4）。先看能不能装回旧版：
 <!-- dsh-memory:end -->

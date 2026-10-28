@@ -365,3 +365,6 @@ gymnasium       0.29.1
 numpy           1.26.4                       ← 必须 1.x
 onnx / onnxruntime  1.16.2 / 1.23.2
 ```
+
+
+> 第二台机器（笔记本）的部署有更省时的做法：见 **docs/laptop_env.md**（拷预编译 MoveIt，约 5 分钟，不用源码编译）。
