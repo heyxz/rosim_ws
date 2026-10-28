@@ -43,6 +43,24 @@ else
   echo "    colcon build --symlink-install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
 fi
 
+echo "== 4.5 GUI 服务能否唤起 VSCode（右上角按钮） =="
+if grep -q "^DISPLAY=" ~/.config/dsh-web.env 2>/dev/null; then
+  echo "  ✅ dsh-web.env 里配了 DISPLAY（$(grep '^DISPLAY=' ~/.config/dsh-web.env | head -1)）"
+else
+  echo "  ❌ dsh-web.env 没有 DISPLAY → 服务里 spawn 的 GUI 程序起不了窗口"
+  echo "     修复：echo 'DISPLAY=:1' >> ~/.config/dsh-web.env"
+  echo "           echo 'XAUTHORITY=/run/user/1000/gdm/Xauthority' >> ~/.config/dsh-web.env"
+  echo "           systemctl --user restart dsh-web"
+fi
+pid=$(systemctl --user show -p MainPID --value dsh-web.service 2>/dev/null)
+if [ -n "$pid" ] && [ -r "/proc/$pid/environ" ]; then
+  if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q '^DISPLAY='; then
+    echo "  ✅ 运行中的 dsh-web 进程已有 DISPLAY（按钮可用）"
+  else
+    echo "  ⚠ 运行中的 dsh-web 进程仍无 DISPLAY —— 需要重启服务才生效"
+  fi
+fi
+
 echo "== 5. 最近的 VSCode 崩溃日志 =="
 L=$(ls -dt ~/.config/Code/logs/*/ 2>/dev/null | head -1)
 [ -n "$L" ] && { grep -aiE "fileWatcher|crash|SIGSEGV|ENOSPC" "$L/main.log" 2>/dev/null | tail -4 | sed 's/^/  /'; }
