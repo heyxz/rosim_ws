@@ -15,6 +15,19 @@
 
 自检：`bash scripts/check_env.sh` → **「没有致命问题」**（仅提示 `.pylibs` 缺失）。
 
+## 端到端验证（2026-10-29 实测）
+
+```
+ros2 launch rosim_server server.launch.py     # 8765 → 200，6 个节点
+./scripts/workpiece_bench.sh 3 ompl           # 3/3 SUCCESS，37~40 秒/位姿
+```
+
+与主力机的 34~40 秒基本持平（规划是单线程瓶颈，8 核够用）。
+
+**注意**：某次单个位姿失败（`fraction 0.696, edge not fully traversable`）是
+**真实的运动学极限**，不是环境问题——同一位置在主战机上同样失败（y≈1.03 的
+可达性只到 70%）。
+
 ## 一、APT 依赖（一次性）
 
 ```bash

@@ -11,10 +11,6 @@
 > 只改下面标记区块内的内容；区块外你可以随便写，不会被覆盖。
 
 <!-- dsh-memory:start -->
-- 2026-10-29 00:02 [GUI] 你：先时一下2,不成功再说
-- 2026-10-29 00:02 [GUI] agent：开始 ②。**分两路并行**：我这边拷 MoveIt 预编译产物（约 5 分钟），你那边装 apt 包。
-- 2026-10-29 00:02 [GUI] agent：拷贝已经在后台跑了。**你现在在笔记本上装 apt 包**（需要输密码）： ```bash sudo apt update && sudo apt install -y \ ros-humble-ros2-control ros-humbl…
-- 2026-10-29 00:03 [GUI] 你：background job bash-71 (bash: cd /home/xz && rsync -a --info=progress2 ~/ws_moveit/install laptop:~/ws_moveit/ 2>&1 | tail -3) finished [sta…
 - 2026-10-29 00:03 [GUI] agent：拷贝完成（185 MB，4595 个文件）✅ 现在验证笔记本能不能认出 MoveIt：
 - 2026-10-29 00:05 [GUI] agent：MoveIt 认出来了（**49 个包**，`moveit_core` 在列）✅ 但 **apt 那步还没跑**——`ros2-control`/`controller-manager`/`ompl`/`xacro`/`libocct` 全…
 - 2026-10-29 00:06 [GUI] 你：我告诉你密码你帮我安装，密码是一个空格
@@ -51,4 +47,8 @@
 - 2026-10-29 00:31 [GUI] agent：两台都干净、都在 `69d60bc`。 ## 今晚这轮做完的事 | 项 | 结果 | | --- | --- | | 笔记本能编译 | ✅ 7 个包，2.5 分钟 | | 笔记本能加载 MoveIt | ✅ `ldd` 无缺失，`ik_pr…
 - 2026-10-29 00:32 [GUI] 你：可以，跑一次
 - 2026-10-29 00:32 [GUI] agent：服务在笔记本上起来了（8765 → 200，6 个节点全在，OMPL 已加载）。跑规划：
+- 2026-10-29 00:33 [GUI] agent：缺 `ws` 模块（WebSocket 导入脚本要用）。装上再跑：
+- 2026-10-29 00:34 [GUI] agent：导入通了（`workpiece_1`），但规划失败。看具体原因：
+- 2026-10-29 00:34 [GUI] agent：规划成功但**执行失败**（`executed=0 failed=1`）。看服务端日志：
+- 2026-10-29 00:35 [GUI] agent：这不是环境问题——是**真实的运动学失败**： ``` cartesian path incomplete (fraction 0.70), relocation 1 edge follow failed: edge not fully t…
 <!-- dsh-memory:end -->
