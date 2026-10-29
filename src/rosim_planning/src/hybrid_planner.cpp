@@ -1,5 +1,7 @@
 #include "rosim_planning/hybrid_planner.h"
 
+#include "rosim_planning/joint_delta.h"
+
 #include <moveit/robot_state/robot_state.h>
 #include <moveit/robot_trajectory/robot_trajectory.h>
 
@@ -12,18 +14,6 @@ namespace rosim::planning
 
 namespace
 {
-double jointDelta(const PlanRequest& req)
-{
-  const auto& current = req.start;
-  double sum = 0.0;
-  for (std::size_t i = 0; i < req.goal_joint_positions.size(); ++i)
-  {
-    const double d = req.goal_joint_positions[i] - current.getVariablePositions()[i];
-    sum += d * d;
-  }
-  return std::sqrt(sum);
-}
-
 std::string shortNumber(double v)
 {
   std::ostringstream ss;
@@ -44,10 +34,13 @@ bool HybridPlanner::plan(const PlanRequest& req, PlanResult& result)
 {
   last_note_.clear();
 
-  const double delta = jointDelta(req);
+  const JointDelta move = computeJointDelta(req);
+  const double delta = move.norm();
+  RCLCPP_DEBUG(logger_, "gate: arm=%.3f rail=%.3f goal_n=%zu group=%s",
+              move.arm, move.rail, req.goal_joint_positions.size(), req.group.c_str());
   if (delta > max_delta_)
   {
-    last_note_ = "位移 " + shortNumber(delta) + " rad 超出 RL 范围，整段 OMPL";
+    last_note_ = "手臂位移 " + shortNumber(delta) + " rad 超出 RL 范围，整段 OMPL";
     return ompl_->plan(req, result);
   }
 

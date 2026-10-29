@@ -1306,7 +1306,17 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   preq.acceleration_scaling = params.acceleration_scaling;
 
   PlanResult preres;
-  if (!planner_->plan(preq, preres) || !preres.success || !preres.trajectory)
+  const bool pre_ok = planner_->plan(preq, preres) && preres.success && preres.trajectory;
+  // 把规划器实际走的判定说清楚（H3：RL / 前缀修复 / 整段 OMPL），否则失败时
+  // 只能看到 "pre-approach planning failed"，无法区分是门限、RL 失败还是 OMPL 超时。
+  {
+    const std::string note = planner_->lastNote();
+    if (note.empty())
+      RCLCPP_INFO(LOGGER, "pre-approach: %s (%s)", pre_ok ? "ok" : "failed", planner_->name().c_str());
+    else
+      RCLCPP_INFO(LOGGER, "pre-approach: %s (%s)", pre_ok ? "ok" : "failed", note.c_str());
+  }
+  if (!pre_ok)
     return report_error(ErrorCode::ERROR_OMPL, "pre-approach planning failed: " + preres.error);
   if (cancel.load())
     return report_error(ErrorCode::ERROR_CANCELED, "canceled after pre-approach");

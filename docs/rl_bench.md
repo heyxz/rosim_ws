@@ -184,3 +184,58 @@ RL 一次都没成功，全部靠 OMPL 兜底完成。
 1. 算法换 SAC（连续控制更稳）
 2. 观测里加"最近障碍点方向"（现在只有距离标量，策略看不到该往哪绕）
 3. 只在"必须绕行"的 6% 上做基准，和 OMPL 比成功率/路径长度/耗时
+
+## H3 闸门的两个 bug 与修复（2026-10-29）
+
+### bug 1：位移度量用错了坐标系和单位
+
+`HybridPlanner::jointDelta` 原来按下标硬减：
+
+```cpp
+req.goal_joint_positions[i] - req.start.getVariablePositions()[i]
+```
+
+而 `goal_joint_positions` 来自 `copyJointGroupPositions`（**组顺序**：j1..j6, rail），
+`getVariablePositions()` 是**模型顺序**（rail 在 j1 之前）→ 全部错位相减；
+并且导轨的米和手臂的弧度被混进同一个欧氏范数。
+
+结果：闸门判定的"位移"与真实手臂位移无关，H3 的 RL 分支几乎永不触发。
+
+修复：新增 `rosim_planning/joint_delta.{h,cpp}`，按**活动关节名**逐个匹配，
+把移动关节（导轨）单列。FallbackPlanner 与 HybridPlanner 共用同一实现。
+
+### bug 2：H3 的判定理由在响应里看不到
+
+`handlePlanJoint` 只对 `FallbackPlanner` 取 note；`plannerLabel()` 虽然处理了
+HybridPlanner，但 plan_joint 没用它 → 响应永远只说 "hybrid"。
+另外 `EdgeFollower` 的接近/退刀段根本不打印规划器判定。
+
+修复：
+- `plan_joint` 改用 `plannerLabel()`；
+- `MotionPlanner` 新增 `virtual std::string lastNote()`，Hybrid/Fallback 覆盖；
+- 接近段打印 `pre-approach: ok (手臂位移 2.14 rad 超出 RL 范围，整段 OMPL)`。
+
+### 修复后的实测（2026-10-29）
+
+随机有效目标 12 个（先 OMPL 验可达）：
+
+```
+目标幅度 0.3  → 手臂位移 ?    → RL 未出解，整段 OMPL      90 ms
+目标幅度 0.5  → 手臂位移 1.51 → 超范围，整段 OMPL         13 ms
+目标幅度 1.8  → 手臂位移 3.17 → 超范围，整段 OMPL         15 ms
+目标幅度 3.0  → 手臂位移 3.69 → 超范围，整段 OMPL         16 ms
+```
+
+闸门拦截 7/12 = **58%**，与真实请求里"位移中位数 3.40 rad"的结论一致。
+
+### 顺带发现：RL 策略是场景专用
+
+- 策略节点 `/rl_plan` 原先**没在跑**，H3 每次白等 2 s 超时（已做成
+  `rosim-rl-policy.service` 常驻）。
+- 跑起来后：训练分布（`out_bank_scene`）自评 100%，但对**随机关节目标**
+  300 步走不到（最小间隙 99~339 mm，不碰撞但到不了）。
+  → 它是"工件场景专用策略"，不是通用 IK 求解器。
+
+**结论**：H3 的 RL 分支在真实焊缝接近段（位移中位数 3.4 rad）基本被闸门挡掉；
+即使放行，策略也只在训练分布内有效。要让它真正起作用，需要先在
+**真实接近目标分布**上训练/微调策略，而不是继续调闸门。

@@ -56,6 +56,10 @@ public:
   /// \brief Plan from req.start to the joint goal, collision-free, and apply
   /// time parameterization. May take seconds; call from a worker thread.
   virtual bool plan(const PlanRequest& req, PlanResult& result) = 0;
+
+  /// 上一次 plan() 的判定理由（可为空）。装饰器会返回更具体的原因，
+  /// 让调用方（焊缝跟随、plan_joint）不必 dynamic_cast 到具体类型。
+  virtual std::string lastNote() const { return std::string(); }
 };
 
 using MotionPlannerPtr = std::shared_ptr<MotionPlanner>;

@@ -19,7 +19,7 @@ namespace rosim::planning
 ///   4. RL 成功但有碰撞        → RL 前缀 + OMPL 修复；修复失败再整段 OMPL
 class HybridPlanner : public MotionPlanner
 {
-public:
+ public:
   HybridPlanner(MotionPlannerPtr rl, MotionPlannerPtr ompl, double max_delta,
                 rclcpp::Logger logger = rclcpp::get_logger("hybrid_planner"));
 
@@ -31,7 +31,7 @@ public:
   bool plan(const PlanRequest& req, PlanResult& result) override;
 
   /// 最近一次 plan() 的说明（用哪个规划器的哪一段）。
-  const std::string& lastNote() const
+  std::string lastNote() const override
   {
     return last_note_;
   }

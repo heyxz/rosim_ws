@@ -549,13 +549,14 @@ void PlanningNode::handlePlanJoint(
 
     PlanResult result;
     const bool ok = planner_ && planner_->plan(preq, result) && result.success;
-    std::string note;
-    if (auto* fb = dynamic_cast<FallbackPlanner*>(planner_.get()))
-      note = fb->lastFallback() ? fb->lastNote() : std::string();
+    // 用 plannerLabel() 而不是只查 FallbackPlanner：H3(hybrid) 的判定理由
+    // 之前在这里被丢掉，导致 plan_joint 的响应永远只说 "hybrid"，看不出
+    // 到底走了 RL、前缀修复还是整段 OMPL。
+    const std::string label = plannerLabel();
 
     const double ms = std::chrono::duration<double, std::milli>(clock::now() - t0).count();
     res->success = ok;
-    res->message = ok ? ((note.empty() ? active_planner_ : note) + ", " +
+    res->message = ok ? (label + ", " +
                          std::to_string(result.trajectory->size()) + " points, " +
                          std::to_string(static_cast<int>(ms)) + " ms")
                       : ("plan failed: " + result.error);

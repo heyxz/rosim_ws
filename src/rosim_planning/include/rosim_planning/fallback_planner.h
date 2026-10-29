@@ -42,7 +42,7 @@ public:
     return last_success_;
   }
 
-  const std::string& lastNote() const
+  std::string lastNote() const override
   {
     return last_note_;
   }

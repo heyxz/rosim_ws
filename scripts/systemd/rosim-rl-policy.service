@@ -1,0 +1,15 @@
+# RL 策略推理节点（提供 /rl_plan），供 H3 的 RL 分支使用
+[Unit]
+Description=rosim RL 策略推理节点 (/rl_plan)
+After=rosim-bench.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/rosim_ws
+Environment=HOME=%h
+ExecStart=/bin/bash %h/rosim_ws/scripts/rl_plan.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -10,8 +10,8 @@ export RL_PLAN_LOG="${RL_PLAN_LOG:-/home/xz/rosim_ws/.scratch/rl_requests.jsonl}
 export ROSIM_RL_MAX_DELTA="${ROSIM_RL_MAX_DELTA:-1.5}"
 export RL_OUT_DIR="${RL_OUT_DIR:-$RL_A_DIR/out_bank_scene}"
 export RL_A_DIR
-export ROS_LOG_DIR="${ROS_LOG_DIR:-$HOME/.ros/log}"
-export ROS_HOME="${ROS_HOME:-$HOME/.ros}"
+export ROS_LOG_DIR="${ROS_LOG_DIR:-/home/xz/rosim_ws/.scratch/roslog}"
+export ROS_HOME="${ROS_HOME:-/home/xz/rosim_ws/.scratch/roshome}"
 export PYTHONPATH="$LIBS:$RL_A_DIR:${PYTHONPATH}"
 export MPLCONFIGDIR="$LIBS/../.mpl"
 exec python3 /home/xz/rosim_ws/scripts/rl_plan_node.py "$@"
