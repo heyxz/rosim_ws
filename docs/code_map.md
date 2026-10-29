@@ -1,13 +1,16 @@
-# 代码地图（2026-10-21）
+# 代码地图（2026-10-21 建立，2026-10-29 按代码核对）
 
 这份文档只回答一个问题：**某个功能在哪个文件里**。协议与算法细节看
 `src/README.md`，RL 对比数据看 `docs/rl_bench.md`。
+
+> 核对方式：本文的每条路径与类名都对应仓库里的真实文件（`find`/`grep` 比对），
+> 不是凭记忆写的。若发现对不上，以代码为准并直接改这里。
 
 ## 1. ROS 2 包
 
 | 包 | 职责 | 关键文件 |
 | --- | --- | --- |
-| `rosim_core` | 几何/STEP 导入、边提取、焊缝拼装、角点规划 | `src/edge_geometry.cpp`、`corner_planner.cpp` |
+| `rosim_core` | 几何/STEP 导入、边提取、焊缝拼装、角点规划 | `occ_geometry_service.cpp`、`edge_frame_generator.cpp`、`seam_builder.cpp`、`corner_planner.cpp`（另有 `occ_to_vtk.cpp`、`robot_link_actors.cpp` 供显示） |
 | `rosim_description` | URDF/xacro、网格、控制器与限位配置 | `urdf/robot.urdf.xacro`、`config/ros2_controllers.yaml`、`config/joint_limits.yaml` |
 | `rosim_interfaces` | 全部 srv/action 定义 | `srv/*.srv`、`action/*.action` |
 | `rosim_planning` | 规划与执行的核心 | 见下表 |
@@ -34,12 +37,17 @@
         │
         └─ MotionPlanner::plan()
              ├─ ompl   : RRTConnect + TOTG
-             ├─ line   : FallbackPlanner( LinePlanner, ompl )
+             ├─ line   : LinePlanner（笛卡尔直线 + 逐步 IK/碰撞/跳变校验）
              ├─ rl     : FallbackPlanner( RlRemotePlanner, ompl )
-             │             └─ /rl_plan 服务 → scripts/rl_plan_node.py（ONNX）
-             └─ auto   : 默认。line（确定性直线）→ rl（需要绕障时）→ ompl（兜底）
-                          = FallbackPlanner( line, FallbackPlanner( rl, ompl, 1.5 ), 1e9 )
+             │             └─ /rl_plan 服务 → scripts/rl_plan_node.py（ONNX Runtime）
+             ├─ hybrid : HybridPlanner( rl, ompl )  RL 前缀 + OMPL 修尾（H3）
+             └─ auto   : 默认。line（确定性直线）→ ompl（几何兜底）
+                          = FallbackPlanner( line, ompl, 1e9 )   ← 已不再经过 RL
 ```
+
+> `auto` 曾经是 `line → rl → ompl`，**2026-10 起改为 `line → ompl`**：实测 94% 的
+> 直连请求本身无碰撞，剩下 6% 恰是策略最不擅长的绕行场景，放进默认链只增加延迟
+> 和不确定性。要用 RL 请显式选 `rl` / `hybrid`。
 
 规划器切换：`set_planner` 服务。实例缓存在 `planner_cache_` 里，**切换不销毁
 旧实例**——OMPL 求解失败后销毁会段错误（2026-10-21，`e9a102a`）。
@@ -89,13 +97,17 @@
 | `rl_benchmark.py` | OMPL vs RL 基准（成功率/耗时/路径长度） |
 | `dump_scene.py` | 导出 MoveIt 规划场景（给训练侧用真实几何） |
 
+多机与运维相关脚本（`role.sh`、`bridge_gate.sh`、`memory_sync.sh`、`peer.sh`、
+`setup_bridge.sh`、`setup_laptop.sh`、`hosts.sh`、`shot.sh`）不在本表重复维护，
+见 [`multi_host.md`](multi_host.md) 与仓库根的 `AGENTS.md`。
+
 ## 5. 数据与依赖路径
 
 | 路径 | 内容 | 可否删除 |
 | --- | --- | --- |
-| `.pylibs/`（仓库根） | torch 2.6 + sb3 + onnxruntime（5.3 GB） | 不能，RL 运行时依赖 |
-| `rl_a/out_*/` | 模型与评估曲线（`out_rail`/`out_real`/`out_scene`/`out_a2`） | — |
-| `.scratch/home` | 服务进程的 HOME（`run-server.sh` 指定，ROS 日志落在这里） | **不能删** |
+| `.pylibs/`（仓库根） | RL 运行时依赖（torch 2.6 + onnxruntime，约 5 GB），**按需生成**：`pip install --target .pylibs`，见 `docs/install.md` §5.2。当前工作区尚未创建 | 存在时不能删（`rl_plan.sh` 依赖） |
+| `rl_a/out_*/` | 训练产物与评估曲线：`out_a2` / `out_bank` / `out_bank_scene` / `out_blocked` / `out_blocked2` | — |
+| `.scratch/home` | 服务进程的 HOME（`run-server.sh` 指定）；ROS 日志与 `rosim/seams.json`（焊缝持久化）都落在这里 | **不能删** |
 
 ## 6. 回归与验证入口
 

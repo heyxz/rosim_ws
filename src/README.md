@@ -21,7 +21,9 @@
 - **双 WebUI**：
   - 调试模式 `/`：工件导入/移动、焊缝列表与建缝、跟随参数、JOG 手动（轴运动/笛卡尔切换、按住连续运动）、回零、日志。
   - 生产模式 `/production`：只读工件视图、焊缝列表、状态/进度、开始焊接/停止。
-- **RL 扩展**：`rosim_rl` 可编译为 `librosim_rl.so`，运行时 dlopen 注册 `"rl"` 规划器。
+- **RL 扩展**：`rosim_rl` 编译为 `librosim_rl.so`，运行时 dlopen 注册 `"rl"` 规划器；
+  真正的策略推理在 Python 侧（`/rl_plan` 服务）。另有实验性 `hybrid` 入口，
+  保留 RL 已走通的前缀、只让 OMPL 修后半段。
 
 ### 技术栈
 
@@ -37,7 +39,10 @@
 | Web 服务 | Boost.Beast（HTTP + WebSocket）、nlohmann/json | 页面托管与 JSON 协议 |
 | 浏览器渲染 | three.js（vendored）+ OrbitControls | 调试/生产页面 WebGL 视图 |
 | 桌面 GUI（保留） | Qt5 + VTK（QVTKOpenGLNativeWidget） | 旧版本地调试界面 |
-| RL（可选） | libtorch / TorchScript、Python numpy | 策略推理与 gym 骨架 |
+| RL（可选） | ONNX Runtime（Python 侧）+ rclpy 服务 | 策略推理；C++ 只负责轨迹拼装与碰撞校验 |
+
+工具链基线（实测 2026-10-29）：Ubuntu 22.04、gcc 11.4、CMake 3.22、OpenCASCADE
+7.5.1、VTK 9.1.0、ROS 2 Humble + MoveIt2（`~/ws_moveit` 源码 overlay）。
 
 ---
 
@@ -75,6 +80,23 @@ rosim_server_node
 - 所有业务状态（当前工件、选中边、速度倍率、规划器）在 `rosim_server` 内维护并广播；
   `rosim_planning` 只负责几何/规划/执行。
 
+### 2.1 规划器组合（`set_planner` 的取值）
+
+`PlanningNode::makePlanner()` 是唯一决定组合的地方，**五种取值**：
+
+| `planner_type` | 实际组合 | 说明 |
+| --- | --- | --- |
+| `auto`（默认） | `FallbackPlanner(line, ompl, 1e9)` | 直线可行就用直线（确定性、毫秒级），否则 OMPL。**不经过 RL** |
+| `line` | `FallbackPlanner(line, ompl, 1e9)` | 同上，显式指定 |
+| `ompl` | OMPL 本体 | 采样规划，几何上有保证但慢且不可复现 |
+| `rl` | `FallbackPlanner(rl, ompl, rl_max_delta)` | 策略求解；位移超门限或失败则整段回退 OMPL |
+| `hybrid` | `HybridPlanner(rl, ompl, rl_max_delta)` | RL 前缀 + OMPL 修尾，不丢弃 RL 已走通的段 |
+
+> ⚠️ **`auto` 历史上曾经是 `line → rl → ompl`，现已改成 `line → ompl`。**
+> 原因写在 `planning_node.cpp` 的注释里：真实请求中 94% 的直连路径本身就无碰撞，
+> 剩下 6% 恰好是策略最不擅长的绕行场景，把 RL 放进默认链只会增加延迟和不确定性。
+> 想验证 RL 请显式选 `rl` / `hybrid`，它们仍是实验性入口。
+
 ---
 
 ## 3. 代码结构与文件说明
@@ -87,7 +109,7 @@ rosim_server_node
 ├── rosim_core/                # 纯几何 + VTK 显示库
 ├── rosim_planning/            # 规划节点与随边跟随算法
 ├── rosim_server/              # 无头渲染 + WebSocket + 浏览器 UI
-├── rosim_rl/                  # RL 规划器扩展 + Python gym 骨架
+├── rosim_rl/                  # RL 远程规划器插件（把 rollout 委托给 /rl_plan）
 └── rosim_viewer/              # 旧版 Qt+VTK 桌面 GUI（保留）
 ```
 
@@ -142,6 +164,10 @@ rosim_server_node
 | `include/rosim_planning/planning_node.h`、`src/planning_node.cpp` | 规划节点。`loadRobotModel()` 加载 URDF+SRDF+kinematics；`setupInterfaces()` 注册所有 service/action；`handleImportModel()` 导入工件并注入碰撞体；`executeFollowEdge()` 在 worker 线程跑完整管线并发布 feedback；`monitorExecution()` 等控制器收敛（关节误差 < 0.003）后返回；`publishTrajectory()` 发 `/arm_controller/joint_trajectory`；`snapshotCurrentState()` 取 `/joint_states` 真值；`handleMoveToPose()`、`handleGoHome()`、`handleJogJoint()`、`handleMoveWorkpiece()`、`handleSetSpeedScale()`、`handleSetPlanner()`。 |
 | `include/rosim_planning/edge_follower.h`、`src/edge_follower.cpp` | 随边跟随核心（纯计算，不碰 ROS 话题）。`execute()` 编排：重采样 → 导轨站位 → 帧生成 → 接近 IK → OMPL 预接近 → Cartesian 沿边 → 截断处理/重定位 → 退刀/末端间隙修剪 → 合并 + TOTG。`solveIkMultiSeed()` 多种子 IK + 碰撞过滤；`solveIkWithRailAllocation()` 0.25/0.5 m 步进换站位；`runCartesian()` 4 mm 步长笛卡尔；`railStationFor()` 按目标 X 与臂展分配站位；`setRailStation()`；`toolpathFeasible()` 整条边可达性预检。 |
 | `include/rosim_planning/ompl_planner.h`、`src/ompl_planner.cpp` | `OmplPlanner::plan()`：pluginlib 加载 `ompl_interface/OMPLPlanner`，构造 `PlanningContext`，求解 `PlanRequest`，失败返回原因；成功后 TOTG 参数化。 |
+| `include/rosim_planning/line_planner.h`、`src/line_planner.cpp` | `LinePlanner`（注册名 `"line"`）：笛卡尔直线规划，逐步 IK + 碰撞检查 + 关节跳变门限；确定性、毫秒级。 |
+| `include/rosim_planning/fallback_planner.h`、`src/fallback_planner.cpp` | `FallbackPlanner`：装饰器。先试主规划器，失败（或位移超 `max_delta`）则整体回退到兜底规划器，并在结果消息里注明 `... fell back`。 |
+| `include/rosim_planning/hybrid_planner.h`、`src/hybrid_planner.cpp` | `HybridPlanner`（注册名 `"hybrid"`，H3）：RL 出初解 → 逐点校验 → **保留无碰撞前缀**，用 OMPL 修掉后半段。与 FallbackPlanner 的区别是「不丢弃 RL 已走通的部分」；四种走向都写进 `lastNote()`。 |
+| `include/rosim_planning/trajectory_timing.h`、`src/trajectory_timing.cpp` | `regularizeTiming()`：最短段钳制 + 50 ms 均匀网格 + 速度填充，保证 JTC 能平滑执行。 |
 | `include/rosim_planning/motion_planner.h`、`src/motion_planner.cpp` | `MotionPlanner` 抽象与 `MotionPlannerFactory` 注册表；`"ompl"` 内置，`"rl"` 由 dlopen 的 `librosim_rl.so` 注册。 |
 | `src/main.cpp` | 多线程 `MultiThreadedExecutor`：Action worker 可长时间规划，service 仍可响应取消/状态查询。 |
 | `tools/home_probe.cpp` | 候选 home 位姿自碰撞与 TCP 位置测量。 |
@@ -169,8 +195,18 @@ rosim_server_node
 
 | 文件 | 作用 |
 | --- | --- |
-| `include/rosim_rl/rl_planner.h`、`src/rl_planner.cpp` | `RlPlanner : MotionPlanner`。观测 22 维（6 关节 + 6 目标 + 6 TCP + 3 切线 + 1 最近距离），动作 6 维（±0.1 rad）；`plan()` 逐步执行策略并逐状态碰撞检查；`loadPolicy()` 加载 TorchScript（需 `-DROSIM_WITH_TORCH=ON`）；`observation()` 为纯函数，供训练桥接复用。无策略时返回明确错误，不影响 OMPL。 |
-| `python/rosim_gym/env.py`、`random_rollout.py` | gym 风格骨架：订阅 `/joint_states`、调用 `ImportModel` / `FollowEdge`；`OBS_DIM/ACT_DIM` 与 C++ 对齐。 |
+| `src/rl_remote_planner.cpp` | `RlRemotePlanner : MotionPlanner`，注册名 `"rl"`。**不做本地推理**：把起点/目标按变量名映射成策略的固定顺序（`[rail_joint, j1..j6]`；6 维请求表示"只有手臂"，导轨保持起点值），发给 `/rl_plan` 服务（`rosim_interfaces/srv/RlPlan`），拿回关节序列后自己拼轨迹、做 TOTG 与 FCL 逐状态校验。服务客户端必须挂在 `Reentrant` 回调组——`plan()` 阻塞等结果时，默认的 `MutuallyExclusive` 组会把响应回调一起堵死，必然超时。 |
+
+推理侧在 Python（服务端是 `scripts/rl_plan_node.py`，观测/归一化复用 `rl_a/` 的训练代码）：
+
+| 文件 | 作用 |
+| --- | --- |
+| `scripts/rl_plan_node.py` | `/rl_plan` 服务端。`onnxruntime` 加载策略，`kin` 复用 `rl_a/kin.py` 的运动学，因此不必在 C++ 里重写一遍观测拼接。 |
+| `rl_a/kin.py` | 由 URDF 重建的运动学（含导轨 + 0.167 m 基座偏移）与胶囊碰撞模型，训练与推理共用同一份。 |
+
+> **设计取舍**：观测构造留在 Python，是为了消掉一整类 sim2sim 偏差（归一化统计、
+> 间隙模型、关节缩放）；C++ 只保留必须与真实场景严格一致的部分——轨迹拼装、
+> 碰撞校验、时间参数化。
 
 ### 3.7 rosim_viewer（保留的桌面 GUI）
 
@@ -266,6 +302,7 @@ rosim_server_node
 | `subscribe_workpiece` / `unsubscribe_workpiece` | — | 只订阅工件几何（生产页） |
 | `subscribe_stream` / `unsubscribe_stream` | — | 订阅服务端 JPEG 二进制帧 |
 | `import` | `file_path`, `pose` | 导入工件 |
+| `list_dir` | `path?` | 列出目录下的模型文件（页面上的文件选择器用；`path` 省略时从上次导入位置开始） |
 | `select_edge` | `edge_index` | 选中边并高亮 |
 | `follow` | `edge_index`, `orientation_mode?`, `tangent_tilt?`, `tool_offset?`, `approach_distance?`, `max_waypoint_spacing?` | 发起随边跟随 |
 | `stop` | — | 取消当前 Action |
@@ -273,8 +310,11 @@ rosim_server_node
 | `move_to_pose` | `pose{position, orientation}` | `tool0` 点到点 |
 | `set_workpiece_pose` | `pose` | 移动工件 |
 | `jog_joint` | `joint_name`, `delta` | 关节/导轨微调 |
+| `jog_cartesian` | `axis`, `delta` | 笛卡尔微调：`axis` 0~5 对应平移 xyz / 旋转 rpy，`delta` 单位米或弧度 |
 | `set_speed` | `scale` | 速度倍率 |
-| `set_planner` | `planner_type` | `ompl` / `rl` |
+| `set_planner` | `planner_type` | `ompl`（几何兜底）/ `line` / `auto`（默认）/ `rl` / `hybrid`，见 §2.1 的组合表 |
+| `plan_demo` | `trials?`, `delta?` | 用当前规划器规划到关节目标并画出 TCP 路径；`trials` 取 1~20 时跑批量验证，汇报成功率与耗时（`delta` 是 6 维关节增量） |
+| `clear_tcp_path` | — | 清空 3D 视图里的 TCP 轨迹 |
 | `get_state` | — | 请求当前状态快照 |
 | `create_seam` | `edge_indices[]`, `tolerance?`, `name?` | 把相连的边合并成一条焊缝（服务端调 `~/create_seam` 校验） |
 | `delete_seam` / `rename_seam` | `id` / `id, name` | 删除 / 重命名焊缝 |
@@ -368,6 +408,16 @@ ros2 launch rosim_server server.launch.py
 **不启动 move_group**。
 
 > 服务端在启动时把 `web/` 页面读进内存；修改 HTML/JS 后需要重启节点。
+
+> **需要把 HOME 隔离到仓库内时**（多机部署、无人值守、以及本仓库的沙箱环境），
+> 不要直接 `ros2 launch`，用包装脚本：
+>
+> ```bash
+> bash scripts/run-server.sh        # HOME → .scratch/home，ROS 日志与 seams.json 都落在这里
+> ```
+>
+> 它做的事就是 source 三个 setup + 设 `HOME` / `ROS_HOME` / `ROS_LOG_DIR` 再 exec
+> launch；直接 launch 会把日志写到 `~/.ros`，在受限环境里可能不可写。
 
 ### 8.2 旧版桌面 GUI / RViz
 
@@ -491,9 +541,12 @@ ros2 run rosim_planning edge_regress -- --out /tmp/new.json --compare ~/rosim_ws
 - `librosim_rl.so` 在规划节点启动时按参数 `planner_libraries` dlopen；静态注册
   `"rl"` 到 `MotionPlannerFactory`。
 - `set_planner("rl")` 后，Action/service 的下游执行与 OMPL 完全一致。
-- 无策略时 `plan()` 快速失败并给出原因，不会阻塞 OMPL。
-- 训练桥接预留：`RlPlanner::observation()`（22 维）、`Spaces::OBS_DIM/ACT_DIM`、
-  Python `rosim_gym`（`python3 -m rosim_gym.random_rollout`）。
+- 推理不在本进程内：`RlRemotePlanner` 调 `/rl_plan` 服务，服务端是
+  `scripts/rl_plan_node.py`（`onnxruntime` + `rl_a/` 的训练代码）。**必须先起这个
+  节点**（`./scripts/rl_plan.sh`），否则 `plan()` 会因服务不可用而快速失败。
+- 服务不可用 / 策略未加载时 `plan()` 返回明确原因，不会阻塞 OMPL。
+- `hybrid` 入口（H3）：RL 出初解 → 校验 → 保留无碰撞前缀 → OMPL 修后半段。
+  想比较"整段回退"和"部分保留"的差异，就在 `rl` 与 `hybrid` 之间切换。
 
 ---
 

@@ -9,6 +9,7 @@ STEP 工件导入 → 在浏览器里建焊缝 → 6 轴 MOTOMAN-GP12 + 第 7 �
 - 落地路线与里程碑：**[docs/roadmap.md](docs/roadmap.md)**
 - 换台电脑装环境（依赖+版本+坑）：**[docs/install.md](docs/install.md)**
 - 多主机协作（笔记本网关 + 主力机算力）：**[docs/multi_host.md](docs/multi_host.md)**
+- 另一台机器（笔记本）的环境差异与坑：**[docs/laptop_env.md](docs/laptop_env.md)**
 - 代码位于 `src/`（7 个 ROS 2 包）
 - 依赖：ROS 2 Humble、MoveIt2、OpenCASCADE 7.5、VTK 9.1、Qt5（仅旧版桌面 GUI）
 
@@ -31,8 +32,10 @@ ros2 launch rosim_server server.launch.py
 
 ## RL 规划（可选）
 
-焊缝的接近/退刀支持三种规划器：`ompl`（默认）、`line`（笛卡尔直线）、
-`rl`（策略 + OMPL 兜底）。
+接近/退刀段有五种规划器可选：`auto`（默认，= 直线 → OMPL，**不经过 RL**）、
+`line`（笛卡尔直线）、`ompl`（采样规划）、`rl`（策略 + OMPL 整段兜底）、
+`hybrid`（RL 前缀 + OMPL 修尾，实验性）。组合规则见
+[src/README.md §2.1](src/README.md)。
 
 ```bash
 ./scripts/rl_plan.sh &                      # 策略推理节点（必须先起）
