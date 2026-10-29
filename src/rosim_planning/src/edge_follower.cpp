@@ -1305,6 +1305,28 @@ EdgeFollowOutcome EdgeFollower::execute(const rosim::core::EdgeData& edge,
   preq.velocity_scaling = params.velocity_scaling;
   preq.acceleration_scaling = params.acceleration_scaling;
 
+  // 采集真实接近目标（供 RL 策略评测/微调用）：组顺序的 start/goal + 关节名。
+  // 写到 .scratch/approach_targets.jsonl，一行一个；用 scripts/eval_approach_rl.py 回放。
+  {
+    std::vector<double> s7;
+    preq.start.copyJointGroupPositions(group, s7);
+    std::ofstream out(".scratch/approach_targets.jsonl", std::ios::app);
+    if (out)
+    {
+      out << "{\"names\":[";
+      const auto& jn = group->getActiveJointModelNames();
+      for (std::size_t i = 0; i < jn.size(); ++i)
+        out << (i ? "," : "") << "\"" << jn[i] << "\"";
+      out << "],\"start\":[";
+      for (std::size_t i = 0; i < s7.size(); ++i)
+        out << (i ? "," : "") << s7[i];
+      out << "],\"goal\":[";
+      for (std::size_t i = 0; i < preq.goal_joint_positions.size(); ++i)
+        out << (i ? "," : "") << preq.goal_joint_positions[i];
+      out << "]}\n";
+    }
+  }
+
   PlanResult preres;
   const bool pre_ok = planner_->plan(preq, preres) && preres.success && preres.trajectory;
   // 把规划器实际走的判定说清楚（H3：RL / 前缀修复 / 整段 OMPL），否则失败时
